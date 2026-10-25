@@ -858,3 +858,170 @@ describe("reconstruction verifier invalid control evidence (#4396)", () => {
     });
   });
 });
+
+describe("reconstruction verifier negative control edge cases (#4396)", () => {
+  it("records vacuous-verifier before skipping missing control Evidence", () => {
+    const ledgerRequest = readyProcessLedgerRequest();
+    const binding = ledgerRequest.manifest.bindings[0]!;
+    const verifier = binding.verifier!;
+    const control = verifier.controls![0]!;
+    const absent = `ev_${"d".repeat(64)}`;
+
+    const vacuousMissingEvidence = build({
+      ...ledgerRequest,
+      manifest: {
+        ...ledgerRequest.manifest,
+        bindings: [
+          {
+            ...binding,
+            verifier: {
+              ...verifier,
+              controls: [
+                {
+                  ...control,
+                  status: "pass",
+                  result_evidence_id: absent,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(vacuousMissingEvidence.status).toBe("failed");
+    expect(vacuousMissingEvidence.obligations[0]).toMatchObject({
+      status: "implemented",
+      verifier_control_status: "vacuous",
+      diagnostics: expect.arrayContaining([
+        {
+          code: "vacuous-verifier",
+          detail: expect.stringContaining(control.control_id),
+        },
+        {
+          code: "missing-verifier-control-result",
+          detail: expect.stringContaining(control.control_id),
+        },
+      ]),
+    });
+  });
+});
+
+describe("reconstruction verifier negative control identity and authority (#4396)", () => {
+  it("requires candidate_sha256 for candidate_id controls and keeps weak-authority controls out of challenged status", () => {
+    const ledgerRequest = readyProcessLedgerRequest();
+    const binding = ledgerRequest.manifest.bindings[0]!;
+    const verifier = binding.verifier!;
+    const control = verifier.controls![0]!;
+    const { candidate_sha256: _omittedDigest, ...controlWithoutDigest } =
+      control;
+    const ownerDigestNegativeProof = boundProofEvidence("packaged", {
+      bindings: [
+        {
+          obligation_id: binding.obligation_id,
+          obligation_version: 1,
+          owner_sha256: binding.owner.owner_sha256,
+          fixtures: [],
+          verifiers: [
+            {
+              verifier_id: verifier.verifier_id,
+              claim_id: verifier.claim_id,
+              passed: false,
+            },
+          ],
+        },
+      ],
+    });
+    const candidateWithoutDigest = build(
+      request(
+        [...ledgerRequest.evidence_bundle.records, ownerDigestNegativeProof],
+        {
+          manifest: {
+            ...ledgerRequest.manifest,
+            bindings: [
+              {
+                ...binding,
+                verifier: {
+                  ...verifier,
+                  controls: [
+                    {
+                      ...controlWithoutDigest,
+                      result_evidence_id: ownerDigestNegativeProof.evidence_id,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ),
+    );
+    expect(candidateWithoutDigest.status).toBe("open");
+    expect(candidateWithoutDigest.obligations[0]).toMatchObject({
+      status: "implemented",
+      verifier_control_status: "inapplicable-control-proof",
+      diagnostics: [
+        {
+          code: "inapplicable-verifier-control-proof",
+          detail: expect.stringContaining("owner-mismatch"),
+        },
+      ],
+    });
+
+    const weakAuthorityControlProof = boundProofEvidence(
+      "packaged-weak-control",
+      {
+        bindings: [
+          {
+            obligation_id: binding.obligation_id,
+            obligation_version: 1,
+            owner_sha256: control.candidate_sha256!,
+            fixtures: [],
+            verifiers: [
+              {
+                verifier_id: verifier.verifier_id,
+                claim_id: verifier.claim_id,
+                passed: false,
+              },
+            ],
+          },
+        ],
+      },
+      "shipped-artifact",
+    );
+    const weakAuthorityControl = build(
+      request(
+        [...ledgerRequest.evidence_bundle.records, weakAuthorityControlProof],
+        {
+          manifest: {
+            ...ledgerRequest.manifest,
+            bindings: [
+              {
+                ...binding,
+                verifier: {
+                  ...verifier,
+                  controls: [
+                    {
+                      ...control,
+                      result_evidence_id: weakAuthorityControlProof.evidence_id,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      ),
+    );
+    expect(weakAuthorityControl.status).toBe("open");
+    expect(weakAuthorityControl.obligations[0]).toMatchObject({
+      status: "implemented",
+      verifier_control_status: "inapplicable-control-proof",
+      diagnostics: [
+        {
+          code: "weak-verifier-authority",
+          detail: expect.stringContaining("insufficient-authority"),
+        },
+      ],
+    });
+  });
+});

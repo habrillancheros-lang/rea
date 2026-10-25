@@ -256,8 +256,10 @@ const evaluateObligation = (
       ? {}
       : {
           verifier_control_status: evaluateVerifierControlStatus(
+            candidate,
+            binding,
             binding.verifier,
-            diagnostics,
+            context,
           ),
         }),
     status: obligationStatus(candidate, binding, diagnostics),
@@ -438,15 +440,6 @@ const evaluateVerifierControls = (
     return;
   }
   for (const control of verifier.controls) {
-    const controlEvidence = context.evidence.get(control.result_evidence_id);
-    if (controlEvidence === undefined) {
-      addDiagnostic(
-        diagnostics,
-        "missing-verifier-control-result",
-        `Verifier negative control ${control.control_id} result Evidence is absent from the bundle.`,
-      );
-      continue;
-    }
     if (control.status === "pass") {
       addDiagnostic(
         diagnostics,
@@ -460,6 +453,28 @@ const evaluateVerifierControls = (
         `Verifier negative control ${control.control_id} status is ${control.status}; expected fail.`,
       );
     }
+    const controlEvidence = context.evidence.get(control.result_evidence_id);
+    if (controlEvidence === undefined) {
+      addDiagnostic(
+        diagnostics,
+        "missing-verifier-control-result",
+        `Verifier negative control ${control.control_id} result Evidence is absent from the bundle.`,
+      );
+      continue;
+    }
+    const controlOwnerSha256 =
+      control.candidate_sha256 ??
+      (control.candidate_id === undefined
+        ? binding.owner.owner_sha256
+        : undefined);
+    if (controlOwnerSha256 === undefined) {
+      addDiagnostic(
+        diagnostics,
+        "inapplicable-verifier-control-proof",
+        `Verifier negative control ${control.control_id} proof qualification: owner-mismatch.`,
+      );
+      continue;
+    }
     const controlProof = context.proofs.get(control.result_evidence_id);
     if (controlProof === undefined) continue;
     const qualification = qualifyReconstructionProof(
@@ -469,7 +484,7 @@ const evaluateVerifierControls = (
         kind: "verifier",
         obligationId: candidate.obligation_id,
         obligationVersion: candidate.obligation_version,
-        ownerSha256: control.candidate_sha256 ?? binding.owner.owner_sha256,
+        ownerSha256: controlOwnerSha256,
         verifierId: verifier.verifier_id,
         claimId: verifier.claim_id,
         expectedPassed: false,
@@ -497,17 +512,30 @@ const evaluateVerifierControls = (
 };
 
 const evaluateVerifierControlStatus = (
+  candidate: ReconstructionObligationCandidate,
+  binding: Binding,
   verifier: NonNullable<Binding["verifier"]>,
-  diagnostics: readonly Diagnostic[],
+  context: EvaluationContext,
 ): NonNullable<ReconstructionObligation["verifier_control_status"]> => {
+  const controlDiagnostics: Diagnostic[] = [];
+  evaluateVerifierControls(
+    candidate,
+    binding,
+    verifier,
+    context,
+    controlDiagnostics,
+  );
   if (verifier.controls === undefined || verifier.controls.length === 0)
     return "unchallenged";
-  if (hasDiagnostic(diagnostics, "vacuous-verifier")) return "vacuous";
-  if (hasDiagnostic(diagnostics, "missing-verifier-control-result"))
+  if (hasDiagnostic(controlDiagnostics, "vacuous-verifier")) return "vacuous";
+  if (hasDiagnostic(controlDiagnostics, "missing-verifier-control-result"))
     return "missing-control-result";
-  if (hasDiagnostic(diagnostics, "inapplicable-verifier-control-proof"))
+  if (
+    hasDiagnostic(controlDiagnostics, "inapplicable-verifier-control-proof") ||
+    hasDiagnostic(controlDiagnostics, "weak-verifier-authority")
+  )
     return "inapplicable-control-proof";
-  if (hasDiagnostic(diagnostics, "verifier-control-unavailable"))
+  if (hasDiagnostic(controlDiagnostics, "verifier-control-unavailable"))
     return "control-unavailable";
   return "challenged";
 };
