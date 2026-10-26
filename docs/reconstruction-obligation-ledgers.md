@@ -437,6 +437,8 @@ is malformed, mismatched, missing `candidate_sha256` for a named `candidate_id`,
 or lacks required authority), or `control-unavailable` (control status is
 `unknown`, `unsupported`, or `skipped`).
 
+Manifest bindings that previously closed an obligation with a passing `verifier` and omitted or empty `verifier.controls` now remain open (`status: "implemented"`, `verifier_control_status: "unchallenged"`, and diagnostic `missing-verifier-control`), because an unchallenged verifier cannot rule out vacuous acceptance. Existing serialized ledgers without `verifier.controls` or `verifier_control_status` continue to parse cleanly; to close an obligation during evaluation, add at least one failing negative control in `verifier.controls` backed by retained `rea.reconstruction-proof` Evidence reporting `passed: false` for the challenged candidate.
+
 Changing the owner digest or obligation version makes retained proof
 inapplicable. Missing identity, including legacy ID-array proof records, keeps
 the ledger open with `inapplicable-fixture-proof` or
