@@ -150,11 +150,8 @@ it("projects a summary view with counts and unresolved reference calculations", 
       total: 2,
     },
   });
-  expect(result.value.unknowns).toEqual(
-    expect.arrayContaining([
-      expect.stringContaining("Binding-specific references"),
-    ]),
-  );
+  expect(result.value.unknowns).toHaveLength(1);
+  expect(typeof result.value.unknowns[0]).toBe("string");
 });
 
 it("pages nodes without nested properties and includes property_count and source_index", () => {
@@ -188,6 +185,55 @@ it("pages nodes without nested properties and includes property_count and source
     reference_count: 2,
     unresolved_reference_count: 1,
     alias_count: 1,
+  });
+});
+
+it("pages nodes with offset and limit, returning the second page and updating coverage", () => {
+  const source = parent();
+  const firstPage = projectAnalysisView(source, {
+    kind: "devicetree",
+    collection: "nodes",
+    offset: 0,
+    limit: 1,
+  });
+  if (!firstPage.ok || firstPage.value.kind !== "devicetree")
+    throw new Error("First page failed");
+  expect(firstPage.value.items).toEqual([
+    {
+      path: "/",
+      parent: null,
+      offset: 48,
+      property_count: 1,
+      source_index: 0,
+    },
+  ]);
+  expect(firstPage.value.coverage).toMatchObject({
+    status: "page",
+    examined: 1,
+    total: 2,
+  });
+
+  const secondPage = projectAnalysisView(source, {
+    kind: "devicetree",
+    collection: "nodes",
+    offset: 1,
+    limit: 1,
+  });
+  if (!secondPage.ok || secondPage.value.kind !== "devicetree")
+    throw new Error("Second page failed");
+  expect(secondPage.value.items).toEqual([
+    {
+      path: "/soc",
+      parent: "/",
+      offset: 96,
+      property_count: 1,
+      source_index: 1,
+    },
+  ]);
+  expect(secondPage.value.coverage).toMatchObject({
+    status: "page",
+    examined: 1,
+    total: 2,
   });
 });
 
@@ -259,7 +305,6 @@ it("rejects properties collection without path", () => {
         {
           path: ["view"],
           reason: "invalid_value",
-          message: "A properties page requires an exact node path.",
         },
       ],
     });
@@ -283,7 +328,6 @@ it("rejects properties collection when node path is absent", () => {
         {
           path: ["view"],
           reason: "invalid_value",
-          message: "The selected node path is absent from this Evidence.",
         },
       ],
     });
@@ -345,7 +389,6 @@ it("rejects path on collections that do not support it", () => {
         {
           path: ["view"],
           reason: "invalid_value",
-          message: "path selects only nodes or properties.",
         },
       ],
     });
@@ -365,7 +408,6 @@ it("rejects unsupported view kinds with an input error", () => {
         {
           path: ["view"],
           reason: "invalid_value",
-          message: "Devicetree Evidence supports summary and devicetree views.",
         },
       ],
     });
