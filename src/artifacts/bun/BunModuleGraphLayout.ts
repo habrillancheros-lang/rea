@@ -10,7 +10,10 @@ import type { FileHandle } from "node:fs/promises";
 
 import { fixedAllowanceRemediation } from "../../domain/fixedAllowanceRemediation.js";
 import { abortIfNeeded } from "../ArtifactHash.js";
-import { ArtifactReaderFailure } from "../ArtifactReader.js";
+import {
+  ArtifactReaderFailure,
+  artifactFixedLimitFailure,
+} from "../ArtifactReader.js";
 
 /** Exact trailer written by Bun's standalone module graph serializer. */
 export const BUN_TRAILER = Buffer.from("\n---- Bun! ----\n");
@@ -201,9 +204,15 @@ export const loadBunStandaloneGraph = async (
   };
 };
 
-/** Four 64 KiB pages bound metadata seeks; returned names never pin cache pages. */
+const MAX_METADATA_READ_BYTES = 256 * 1024 * 1024;
+const METADATA_CACHE_BYTES = 256 * 1024;
+const METADATA_CACHE_ENTRIES = 1024;
+
+/** Exact-range caching avoids page amplification from file-controlled pointers. */
 class BunGraphRangeReader implements BunGraphData {
-  readonly #pages = new Map<number, Buffer>();
+  readonly #ranges = new Map<string, Buffer>();
+  #retainedBytes = 0;
+  #readBytes = 0;
   constructor(
     private readonly handle: FileHandle,
     private readonly start: number,
@@ -222,29 +231,40 @@ class BunGraphRangeReader implements BunGraphData {
       length > this.length - offset
     )
       throw bunFormatFailure("metadata range exceeds the Bun module graph");
-    const result = Buffer.alloc(length);
-    for (let copied = 0; copied < length;) {
-      abortIfNeeded(this.signal);
-      const position = offset + copied;
-      const pageStart = Math.floor(position / 65_536) * 65_536;
-      let page = this.#pages.get(pageStart);
-      if (page === undefined) {
-        page = await readExact(
-          this.handle,
-          this.start + pageStart,
-          Math.min(65_536, this.length - pageStart),
-          this.signal,
-        );
-        if (this.#pages.size === 4)
-          this.#pages.delete(this.#pages.keys().next().value!);
-      } else this.#pages.delete(pageStart);
-      this.#pages.set(pageStart, page);
-      const at = position - pageStart;
-      const count = Math.min(page.length - at, length - copied);
-      page.copy(result, copied, at, at + count);
-      copied += count;
+    if (length === 0) return Buffer.alloc(0);
+    const key = `${String(offset)}:${String(length)}`;
+    const existing = this.#ranges.get(key);
+    if (existing !== undefined) {
+      this.#ranges.delete(key);
+      this.#ranges.set(key, existing);
+      return Buffer.from(existing);
     }
-    return result;
+    if (length > MAX_METADATA_READ_BYTES - this.#readBytes)
+      throw artifactFixedLimitFailure(
+        "Bun metadata read work",
+        MAX_METADATA_READ_BYTES,
+        "bytes",
+      );
+    // Charge physical work before allocation or I/O, including uncached large names.
+    this.#readBytes += length;
+    const bytes = await readExact(
+      this.handle,
+      this.start + offset,
+      length,
+      this.signal,
+    );
+    if (length > METADATA_CACHE_BYTES) return bytes;
+    while (
+      this.#ranges.size >= METADATA_CACHE_ENTRIES ||
+      this.#retainedBytes + length > METADATA_CACHE_BYTES
+    ) {
+      const oldest = this.#ranges.keys().next().value!;
+      this.#retainedBytes -= this.#ranges.get(oldest)!.length;
+      this.#ranges.delete(oldest);
+    }
+    this.#ranges.set(key, bytes);
+    this.#retainedBytes += length;
+    return Buffer.from(bytes);
   }
 }
 

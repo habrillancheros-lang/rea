@@ -12,7 +12,10 @@ import { jsonValueByteLength } from "../domain/jsonValueByteLength.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import { readFileHandleChunks } from "../filesystem/readFileHandleChunks.js";
 import { assertArtifactReadActive } from "./ArtifactFileOperation.js";
-import { normalizeArtifactPath } from "./ArtifactPaths.js";
+import {
+  normalizeArtifactPath,
+  ArtifactPathRegistry,
+} from "./ArtifactPaths.js";
 import {
   ArtifactReaderFailure,
   copyArtifactEntry,
@@ -39,6 +42,7 @@ import {
 const REGIONS = ["contents", "sourcemap", "bytecode", "module-info"] as const;
 type BunRegion = (typeof REGIONS)[number];
 const MAX_LOGICAL_PATH_PARTS = 256;
+const MAX_LOGICAL_PATH_NODES = 250_000;
 interface BunModuleDestination {
   readonly path: string;
   readonly sourcePath?: string;
@@ -239,6 +243,10 @@ export class BunStandaloneArtifactReader implements ArtifactReader {
     const expansionBudget = BigInt(
       artifactExpansionBudgetBytes(located.graph.payloadLength),
     );
+    const paths = new ArtifactPathRegistry({
+      maxParts: MAX_LOGICAL_PATH_PARTS,
+      maxNodes: MAX_LOGICAL_PATH_NODES,
+    });
     for (const module of decoded.modules) {
       assertArtifactReadActive(signal);
       const destination =
@@ -262,6 +270,7 @@ export class BunStandaloneArtifactReader implements ArtifactReader {
           range,
           destination,
         );
+        paths.reservePath(entry.path);
         retainedBytes += jsonValueByteLength(
           entryMetadataJson(entry),
           Math.max(0, MAX_BUN_RETAINED_BYTES - retainedBytes),

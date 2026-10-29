@@ -40,10 +40,13 @@ Sourcemaps are stored Bun regions, not necessarily standalone JSON source maps.
 Extracted contents retain their original encoding. Use JavaScript analysis only on
 compatible source files; bytecode is retained as evidence, not decoded.
 
-Module parsing reads bounded metadata windows rather than loading stored asset
-bodies. Four 64 KiB pages are cached for one reader preparation; the module
-table and decoded strings have separate admission checks. Stored bodies are
-range-streamed for hashing and extraction. Header/suffix observations are reused
+Module parsing reads exact metadata ranges rather than loading stored asset
+bodies or whole pages around small pointers. A cache retains at most 256 KiB
+and 1,024 ranges for one reader preparation. Cumulative uncached metadata reads
+are limited to 256 MiB, checked before allocation or I/O. The module table,
+decoded strings and combined logical path tree have separate admission checks;
+at most 250,000 distinct path prefixes are admitted before inventory construction.
+Stored bodies are range-streamed for hashing and extraction. Header/suffix observations are reused
 only for the same admitted file state, with selected-path checks before publication.
 
 See [limits and recovery](design/limits-and-recovery.md) for admission ceilings.
