@@ -1629,7 +1629,7 @@ export class GdbSessionManager {
     while (offset < data.byteLength) {
       if (session.discardingOversizedStreamRecord) {
         const newline = data.indexOf(0x0a, offset);
-        if (newline < 0) return;
+        if (newline < 0) break;
         session.discardingOversizedStreamRecord = false;
         offset = newline + 1;
         continue;
@@ -1647,9 +1647,6 @@ export class GdbSessionManager {
           session.bufferChunks[0]?.at(0) ??
           session.bufferTail?.at(0) ??
           piece.at(0);
-        // Stream records carry only console, target or log output, and MI
-        // c-strings escape newlines: a raw LF always ends the record, so the
-        // rest of an oversized stream record is output loss, not desync.
         if (firstByte === 0x7e || firstByte === 0x40 || firstByte === 0x26) {
           session.bufferChunks.length = 0;
           session.bufferTail = undefined;
@@ -1660,7 +1657,7 @@ export class GdbSessionManager {
           session.recentRecordsTruncated = true;
           if (newline < 0) {
             session.discardingOversizedStreamRecord = true;
-            return;
+            break;
           }
           offset = newline + 1;
           continue;
