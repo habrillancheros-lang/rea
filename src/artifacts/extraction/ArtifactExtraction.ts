@@ -591,6 +591,7 @@ const requireExtractableFormat = async (
     format !== "intel-hex" &&
     format !== "srec" &&
     format !== "esp-image" &&
+    format !== "fit" &&
     format !== "mach-o-universal" &&
     !isZipPackageFormat(format)
   ) {
@@ -604,7 +605,9 @@ const requireExtractableFormat = async (
           (await probes.godotPck()) !== undefined ||
           ((format === "elf" || format === "pe" || format === "mach-o") &&
             ((await probes.nodeSea()) !== undefined ||
-              (await probes.pyInstaller()) !== undefined));
+              (await probes.pyInstaller()) !== undefined ||
+              (await probes.bunStandalone()).status === "present" ||
+              (await probes.dotnetBundle()) !== undefined));
         if (pack && input.expectedRootSha256 !== undefined) {
           const digest = await hashStableRootArtifactHandle(
             path,
@@ -648,7 +651,10 @@ const createReader = (
       ? undefined
       : createArtifactReader(path, containerFormat, {
           environment: input.environment,
-          unreadableDirectories: "fail",
+          // Inventory already records inaccessible descendants as omissions.
+          // Keep that traversal policy here; the selected-path check below
+          // still refuses any inventoried file that cannot be materialized.
+          unreadableDirectories: "omit",
           selectedPath: absoluteCallerPath(
             input.selectedPath ?? input.inputPath,
           ),

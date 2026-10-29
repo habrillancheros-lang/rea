@@ -1,4 +1,5 @@
 import { sqliteDatabaseCapability } from "./sqlite/SqliteDatabaseCapability.js";
+import { persistentDebuggerHostSupported } from "../process/PersistentDebuggerHost.js";
 import { pcapCaptureHostSupported } from "../domain/pcap/pcapAnalysis.js";
 import { describe, expect, it } from "vitest";
 
@@ -150,6 +151,13 @@ it("reports the active resource session's dispatch policy without limiting indep
     expect(entries.find((item) => item.name === name)).toMatchObject({
       available: true,
     });
+  expect(
+    entries.find((item) => item.name === "inspect_apk_signature"),
+  ).toMatchObject({
+    available: true,
+    reason: "available",
+    remediation: null,
+  });
   const sqlite = sqliteDatabaseCapability(process.versions.node);
   expect(
     entries.find((item) => item.name === "inspect_sqlite_database"),
@@ -951,6 +959,32 @@ it("keeps independent native sessions discoverable without an unrelated binary t
     { available: false, reason: "target_required" },
   );
 });
+
+it.each(["darwin", "linux", "win32"] as const)(
+  "reports the persistent debugger start host restriction on %s",
+  (platform) => {
+    const entries = buildCapabilityInventory(status(), {
+      ...enabledPolicy,
+      hostUnsupported: {
+        persistentDebugger: !persistentDebuggerHostSupported(platform),
+      },
+    });
+    for (const name of ["start_gdb_session", "start_rizin_debug_session"])
+      expect(entries.find((entry) => entry.name === name)).toMatchObject(
+        platform === "linux"
+          ? { available: true, reason: "available" }
+          : {
+              available: false,
+              reason: "unsupported_host",
+              remediation: expect.stringContaining("Linux"),
+            },
+      );
+    for (const name of ["gdb_session_status", "close_rizin_debug_session"])
+      expect(entries.find((entry) => entry.name === name)).toMatchObject({
+        available: true,
+      });
+  },
+);
 
 describe("summary tool availability", () => {
   it("summarizes every tool's current availability without static catalog flags", () => {

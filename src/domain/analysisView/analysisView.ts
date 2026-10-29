@@ -238,12 +238,12 @@ import {
   managedViewContextSchema,
 } from "./managedArtifactView.js";
 import {
-  projectManagedMemberView,
   managedMembersViewRequestSchema,
   managedMembersViewPageSchema,
   managedMemberSummarySchema,
   managedMembersViewContextSchema,
-} from "./managedMemberView.js";
+} from "./managedMemberViewSchemas.js";
+import { projectManagedMemberView } from "./managedMemberView.js";
 import {
   projectWasmArtifactView,
   wasmViewRequestSchema,
@@ -1207,6 +1207,7 @@ const machoPageViewResultSchema = z
       machoPage("imports"),
       machoPage("exports"),
       machoPage("segments"),
+      machoPage("encryption"),
       machoPage("provenance"),
     ]),
   );
