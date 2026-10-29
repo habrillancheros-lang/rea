@@ -8,10 +8,13 @@ import { executeManagedMemberComparison } from "../../../../src/application/mana
 import { managedMemberComparisonResultSchema } from "../../../../src/domain/managed/managedMemberComparison.js";
 
 it("keeps field comparison policy and delivers its owning limitation for changed defaults", () => {
-  const observe = (hex: string) => {
+  const observe = (hex: string, hasDefault = true, moduleByte = 0) => {
     const bytes = buildManagedPeFixture({
-      fields: [{ name: "Default", flags: 0x8056 }],
-      constants: [{ typeCode: 8, value: Buffer.from(hex, "hex") }],
+      mvid: Buffer.alloc(16, moduleByte),
+      fields: [{ name: "Default", flags: hasDefault ? 0x8056 : 0x56 }],
+      constants: hasDefault
+        ? [{ typeCode: 8, value: Buffer.from(hex, "hex") }]
+        : [],
     });
     const target = managedPeFixtureTarget(bytes);
     const report = inspectManagedMembersBytes(bytes, target);
@@ -57,4 +60,20 @@ it("keeps field comparison policy and delivers its owning limitation for changed
   expect(comparison.limitations).toEqual(
     expect.arrayContaining(comparisonLimitations(left.report, right.report)),
   );
+  const ordinary = observe("", false, 1);
+  const otherOrdinary = observe("", false, 2);
+  expect(ordinary.report.fields[0]?.constant).toBeNull();
+  const baseline = executeManagedMemberComparison({
+    left: ordinary.evidence,
+    right: otherOrdinary.evidence,
+  });
+  if (!baseline.ok) throw baseline.error;
+  const baselineComparison = managedMemberComparisonResultSchema.parse(
+    baseline.value.evidence.normalized_result,
+  );
+  expect(
+    comparison.limitations.filter(
+      (limitation) => !baselineComparison.limitations.includes(limitation),
+    ),
+  ).toHaveLength(1);
 });
