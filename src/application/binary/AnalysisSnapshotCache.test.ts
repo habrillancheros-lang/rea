@@ -808,6 +808,27 @@ describe("analysis snapshot cache policy", () => {
         document: "fixture",
       }),
     ).toBe(true);
+    const callees = { ...descriptor, operation: "procedure_callees" as const };
+    expect(
+      isSourceEvidenceRetainable("procedure_callees", callees, parameters),
+    ).toBe(true);
+    const pseudocode = {
+      ...descriptor,
+      operation: "procedure_pseudo_code" as const,
+    };
+    expect(
+      isSourceEvidenceRetainable(
+        "procedure_pseudo_code",
+        pseudocode,
+        parameters,
+      ),
+    ).toBe(false);
+    expect(
+      isSourceEvidenceRetainable("procedure_pseudo_code", pseudocode, {
+        ...parameters,
+        document: "fixture",
+      }),
+    ).toBe(true);
   });
 });
 

@@ -95,10 +95,18 @@ const replayDocumentSelected = (
   typeof parameters.document === "string";
 
 /**
+ * Caller and callee walks omit `document`. Their observations are still
+ * Evidence. Other document-scoped reads, including `procedure_pseudo_code`
+ * from `decompile_all`, already keep each body in the file-backed export.
+ * Copying those bodies into the in-memory ledger would retain the export.
+ */
+const DOCUMENTLESS_SOURCE_EVIDENCE_OPERATIONS: ReadonlySet<AnalysisOperation> =
+  new Set(["procedure_callers", "procedure_callees"]);
+
+/**
  * Whether a source observation is safe to retain as Evidence.
- * A missing document selector blocks snapshot replay, not retention: composed
- * caller walks still need the native result and forward observations after the
- * workflow index is cleared.
+ * A missing document selector blocks snapshot replay. Only caller and callee
+ * walks stay in the ledger without one.
  */
 export const isSourceEvidenceRetainable = (
   operation: AnalysisOperation,
@@ -107,6 +115,9 @@ export const isSourceEvidenceRetainable = (
 ): descriptor is CapabilityDescriptor =>
   !STATEFUL_OPERATIONS.has(operation) &&
   !RESOURCE_SCOPED_OPERATIONS.has(operation) &&
+  (!DOCUMENT_SCOPED_OPERATIONS.has(operation) ||
+    typeof parameters.document === "string" ||
+    DOCUMENTLESS_SOURCE_EVIDENCE_OPERATIONS.has(operation)) &&
   (!CURSOR_DEFAULT_OPERATIONS.has(operation) ||
     typeof parameters.address === "string") &&
   descriptor?.effects.mutatesArtifact === false &&
