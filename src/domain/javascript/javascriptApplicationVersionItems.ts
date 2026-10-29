@@ -1,4 +1,5 @@
 import { absenceClaimable, canonicalJson } from "../comparisonSemantics.js";
+import { applicationNodeContentDigest } from "./javascriptApplicationFileIdentity.js";
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
 import type { Evidence } from "../evidence.js";
@@ -506,8 +507,8 @@ const changedDimensions = (
 };
 
 const contentIdentity = (node: ApplicationNode): string | null => {
-  if (node.identity.strategy === "content-digest")
-    return `content:${node.identity.sha256}`;
+  const digest = applicationNodeContentDigest(node);
+  if (digest !== null) return `content:${digest}`;
   if (node.kind === "javascript-module")
     return stringProperty(node, "source_sha256");
   if (

@@ -137,8 +137,9 @@ cliTest.skipIf(process.versions.bun !== undefined).for([
       const node = result.graph.nodes.find(
         ({ kind, identity }) =>
           kind === "javascript-asset" &&
-          identity.strategy === "content-digest" &&
-          identity.sha256 === digest,
+          identity.strategy === "artifact-local-key" &&
+          identity.namespace === "application-file-occurrence" &&
+          identity.artifact_sha256 === digest,
       );
       expect(node?.observations).toEqual(
         expect.arrayContaining([
