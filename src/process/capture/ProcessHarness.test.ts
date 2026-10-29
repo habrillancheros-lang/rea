@@ -473,6 +473,10 @@ it("retains unrelated withheld processes through cleanup, capture, and JSON", as
       ...original.residual_unknowns,
       {
         scope: "process",
+        reason: expect.stringContaining("cleanup sent termination signals"),
+      },
+      {
+        scope: "process",
         reason: expect.stringContaining("900 could not be verified"),
       },
       {
