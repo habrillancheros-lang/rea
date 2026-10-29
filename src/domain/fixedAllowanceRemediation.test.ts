@@ -57,6 +57,30 @@ describe("resource constraint recovery shape", () => {
     expect("fixedAllowance" in guided.recovery).toBe(false);
     expect(resourceConstraintRecovery(guided)).toEqual(guided.recovery);
   });
+
+  it("keeps only the fixed allowance when both recovery fields are supplied", () => {
+    const conflict = {
+      fixedAllowance: { name: "parser_allowance", kind: "parser" as const },
+      remediationAction: "wait_for_slot",
+      retryable: false as const,
+    };
+    const error = new AnalysisResourceConstraintError(
+      "inspect_fixture",
+      "memory",
+      "allowance_exceeded",
+      null,
+      // The public options type cannot express both fields. This is the
+      // runtime object the constructor still has to normalize.
+      conflict as never,
+    );
+    expect(error.recovery).toEqual({
+      fixedAllowance: { name: "parser_allowance", kind: "parser" },
+      retryable: false,
+    });
+    expect(error.fixedAllowance).toEqual(conflict.fixedAllowance);
+    expect(error.remediationAction).toBeUndefined();
+    expect(resourceConstraintRecovery(error)).toEqual(error.recovery);
+  });
 });
 
 describe("fixed allowance recovery", () => {
