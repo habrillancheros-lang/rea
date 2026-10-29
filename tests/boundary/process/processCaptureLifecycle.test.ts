@@ -24,6 +24,7 @@ import { snapshotRoots } from "../../../src/process/capture/FilesystemSnapshot.j
 import { ProcessCaptureError } from "../../../src/process/capture/ProcessCaptureError.js";
 import { expectUnverifiedHostCleanup } from "../../support/hostCleanup.js";
 import {
+  PROCESS_CAPTURE_CLEANUP_INTERVENTION_UNKNOWN,
   ProcessCaptureResourceScope,
   type ProcessCaptureCleanupHost,
   observeLaunchedExecutable,
@@ -317,10 +318,9 @@ itWithCaptureCapability(
           "verified",
         );
         expect(capture.settlement.cleanup_outcome).toBe("cleaned");
-        expect(capture.residual_unknowns).toContainEqual({
-          scope: "process",
-          reason: expect.stringContaining("cleanup sent termination signals"),
-        });
+        expect(capture.residual_unknowns).toContainEqual(
+          PROCESS_CAPTURE_CLEANUP_INTERVENTION_UNKNOWN,
+        );
       }
       await waitForProcessExit(ownedPid);
       const unownedState = await processState(unownedPid);

@@ -353,6 +353,10 @@ export interface IncompleteProcessCaptureObservations {
   readonly manifest: PartialProcessObservationField<
     UnverifiedProcessCapture["manifest"]
   >;
+  /** Facts retained after completion failed; historical records may omit them. */
+  readonly residual_unknowns?:
+    | UnverifiedProcessCapture["residual_unknowns"]
+    | undefined;
 }
 
 const fileStateSchema = z.discriminatedUnion("type", [
@@ -666,6 +670,8 @@ const incompleteProcessCaptureObservationsSchema = z.strictObject({
   manifest: partialObservationFieldSchema(
     processCaptureShapeSchema.shape.manifest,
   ),
+  residual_unknowns:
+    processCaptureShapeSchema.shape.residual_unknowns.optional(),
 });
 
 const partialCleanupReportSchema = z.strictObject({

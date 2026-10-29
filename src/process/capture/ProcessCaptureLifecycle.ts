@@ -1639,11 +1639,24 @@ export interface TerminalCaptureRetention {
   readonly normalized_terminal: NormalizedTerminalRetention;
 }
 
-const cleanupInterventionUnknown = {
+export const PROCESS_CAPTURE_CLEANUP_INTERVENTION_UNKNOWN = {
   scope: "process" as const,
   reason:
     "Owned-process cleanup sent termination signals. Later terminal and filesystem observations may omit work ended by this intervention.",
 };
+
+const cleanupResidualUnknowns = (
+  unknowns: UnverifiedProcessCapture["residual_unknowns"],
+  signaled: boolean | undefined,
+): UnverifiedProcessCapture["residual_unknowns"] =>
+  signaled === true &&
+  !unknowns.some(
+    (unknown) =>
+      unknown.scope === PROCESS_CAPTURE_CLEANUP_INTERVENTION_UNKNOWN.scope &&
+      unknown.reason === PROCESS_CAPTURE_CLEANUP_INTERVENTION_UNKNOWN.reason,
+  )
+    ? [...unknowns, PROCESS_CAPTURE_CLEANUP_INTERVENTION_UNKNOWN]
+    : unknowns;
 
 /** Interpret settlement and observed cleanup action once for full/partial output. */
 export const processCaptureCleanupFacts = (
@@ -1675,15 +1688,10 @@ export const processCaptureCleanupFacts = (
               ? "failed"
               : "cleaned",
         },
-  residual_unknowns:
-    outcome.ownedProcessesSignaled === true &&
-    !capture.residual_unknowns.some(
-      (unknown) =>
-        unknown.scope === cleanupInterventionUnknown.scope &&
-        unknown.reason === cleanupInterventionUnknown.reason,
-    )
-      ? [...capture.residual_unknowns, cleanupInterventionUnknown]
-      : capture.residual_unknowns,
+  residual_unknowns: cleanupResidualUnknowns(
+    capture.residual_unknowns,
+    outcome.ownedProcessesSignaled,
+  ),
 });
 
 export const resolveProcessResult = (
@@ -1712,7 +1720,17 @@ export const resolveProcessResult = (
     if (capture === undefined) {
       if (normalizedObservations !== undefined) {
         const partialResult = partialProcessCaptureObservationSchema.safeParse({
-          observations: normalizedObservations,
+          observations: {
+            ...normalizedObservations,
+            ...(cleanupOutcome.ownedProcessesSignaled === true
+              ? {
+                  residual_unknowns: cleanupResidualUnknowns(
+                    normalizedObservations.residual_unknowns ?? [],
+                    cleanupOutcome.ownedProcessesSignaled,
+                  ),
+                }
+              : {}),
+          },
           cleanup,
           execution_failure: executionFailureReason ?? null,
         });

@@ -1,9 +1,13 @@
 import { expect, it } from "vitest";
 import { emptyProcessCapture } from "../../domain/process/processCapture.fixture.js";
+import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
+import { analysisErrorProjectionSchema } from "../../contracts/errorSchemas.js";
 import { ProcessCaptureError } from "./ProcessCaptureError.js";
 import {
+  PROCESS_CAPTURE_CLEANUP_INTERVENTION_UNKNOWN,
   releaseProcessResources,
   resolveProcessResult,
+  createProcessCaptureObservationBuffer,
   type ProcessCaptureCleanupOutcome,
   type PendingProcessCapture,
 } from "./ProcessCaptureLifecycle.js";
@@ -37,10 +41,7 @@ const observedCleanup = (signaled: boolean, rendererFailure?: () => boolean) =>
     },
   });
 
-const intervention = {
-  scope: "process",
-  reason: expect.stringContaining("cleanup sent termination signals"),
-};
+const intervention = PROCESS_CAPTURE_CLEANUP_INTERVENTION_UNKNOWN;
 
 it("reports cleanup intervention even when settlement had already quiesced", async () => {
   const cleanup = await observedCleanup(true);
@@ -71,8 +72,10 @@ it("updates a validated capture once and does not duplicate intervention facts",
   const repeated = resolveProcessResult(capture, undefined, cleanup);
   expect(repeated.residual_unknowns).toEqual(capture.residual_unknowns);
   expect(
-    repeated.residual_unknowns.filter((unknown) =>
-      unknown.reason.includes("cleanup sent termination signals"),
+    repeated.residual_unknowns.filter(
+      (unknown) =>
+        unknown.scope === intervention.scope &&
+        unknown.reason === intervention.reason,
     ),
   ).toHaveLength(1);
 });
@@ -143,3 +146,90 @@ it("preserves saved intervention when a later report has no signal fact", async 
   expect(restored.settlement).toEqual(capture.settlement);
   expect(restored.residual_unknowns).toEqual(capture.residual_unknowns);
 });
+
+it.each([false, true])(
+  "retains intervention before a capture exists, including failed cleanup: %s",
+  async (cleanupFails) => {
+    let rendererFails = cleanupFails;
+    const cleanup = await observedCleanup(true, () => rendererFails);
+    const observations = createProcessCaptureObservationBuffer({
+      frames: [{ sequence: 0, at_ms: 0, data: "collected terminal output" }],
+      interactions: [],
+      samples: [],
+      eventJournal: [],
+      before: undefined,
+    });
+    observations.settlement = {
+      state: "available",
+      value: { state: "quiesced", elapsed_ms: 12 },
+    };
+    const failure = new Error("final filesystem snapshot failed");
+    try {
+      resolveProcessResult(undefined, failure, cleanup, observations);
+      throw new Error("Expected incomplete observations");
+    } catch (cause: unknown) {
+      if (!(cause instanceof ProcessCaptureError)) throw cause;
+      expect(cause.cause).toBe(failure);
+      expect(cause.cleanupIncomplete).toBe(cleanupFails);
+      expect(cause.partialObservation).toMatchObject({
+        observations: {
+          frames: observations.frames,
+          settlement: observations.settlement,
+          filesystem_snapshots: {
+            after: { state: "unavailable" },
+          },
+          residual_unknowns: expect.arrayContaining([intervention]),
+        },
+      });
+      expect(
+        analysisErrorProjectionSchema.parse(projectAnalysisError(cause)),
+      ).toMatchObject({
+        details: {
+          partial_observation: {
+            observations: {
+              residual_unknowns: expect.arrayContaining([intervention]),
+            },
+          },
+        },
+      });
+    } finally {
+      rendererFails = false;
+      await cleanup.cleanupLease?.release();
+    }
+  },
+);
+
+it.each([false, undefined])(
+  "does not infer intervention for incomplete observations from %s",
+  async (signaled) => {
+    const observed = await observedCleanup(false);
+    const cleanup: ProcessCaptureCleanupOutcome = {
+      report: observed.report,
+      cleanupLease: observed.cleanupLease,
+      ...(signaled === undefined ? {} : { ownedProcessesSignaled: signaled }),
+    };
+    const observations = createProcessCaptureObservationBuffer({
+      frames: [],
+      interactions: [],
+      samples: [],
+      eventJournal: [],
+      before: undefined,
+    });
+    try {
+      resolveProcessResult(
+        undefined,
+        new Error("terminal read failed"),
+        cleanup,
+        observations,
+      );
+      throw new Error("Expected incomplete observations");
+    } catch (cause: unknown) {
+      if (!(cause instanceof ProcessCaptureError)) throw cause;
+      const partial = cause.partialObservation;
+      if (partial === undefined || !("observations" in partial))
+        throw new Error("Expected incomplete observations");
+      expect(partial.observations).not.toHaveProperty("residual_unknowns");
+      expect(partial.observations.settlement.state).toBe("unavailable");
+    }
+  },
+);

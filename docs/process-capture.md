@@ -619,6 +619,12 @@ filesystem work. Failed resource cleanup remains `failed` and retains the same
 intervention fact in partial observations. This does not establish how an
 uncaptured run would have continued or change which processes REA may signal.
 
+If capture completion fails before a capture exists, the intervention is retained
+in `partial_observation.observations.residual_unknowns`, alongside the available
+observations and explicit unavailable fields. Older records may omit this optional
+array. No intervention entry is added without an observed signaling fact; absence
+does not prove that cleanup sent no signals.
+
 Readers that previously accepted only `not_required` for a quiesced settlement
 must refresh the advertised MCP schema or update their saved-capture reader to
 accept `cleaned` as well. Existing saved captures remain valid and keep their
