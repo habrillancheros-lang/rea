@@ -242,6 +242,27 @@ describe("Hopper relationship coverage", () => {
         });
         if (!observed.ok) throw observed.error;
         expect(observed.value.result).toEqual(source);
+        if (operation === "procedure_callers") {
+          expect(observed.value.rawResult).toMatchObject({
+            native_result: {
+              callers: [],
+              callers_complete: true,
+              instructions_complete: true,
+              target: { address: "0x1000" },
+            },
+            forward_observations: {
+              call_references: [],
+              call_site_callers: [],
+            },
+          });
+          expect(observed.value.rawResult).toMatchObject({
+            native_result: expect.not.objectContaining({
+              instructions: expect.any(Array),
+            }),
+          });
+        }
+        if (operation === "procedure_callees")
+          expect(observed.value.rawResult).toBeNull();
         expect(observed.value.relationshipCoverage).toMatchObject({
           status: "unknown",
           limited_directions: directions,

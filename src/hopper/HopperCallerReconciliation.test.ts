@@ -111,13 +111,39 @@ it("builds one forward index for successive queries in a workflow", async () => 
       forward_observations: {
         target: { address: "0x2000" },
         callee_inventory_callers: [{ address: "0x3000" }],
-        call_references: [compactEdge],
+        call_references: [
+          {
+            caller_address: caller.address,
+            source_address: compactEdge.source_address,
+            target_address: compactEdge.target_address,
+            source_procedure: caller.address,
+            target_procedure: compactEdge.target_procedure,
+            call: compactEdge.call,
+          },
+        ],
+        call_site_callers: [],
       },
     });
-  if (first.ok)
+  if (
+    first.ok &&
+    first.value.rawResult !== null &&
+    typeof first.value.rawResult === "object" &&
+    !Array.isArray(first.value.rawResult)
+  ) {
+    const observations = first.value.rawResult.forward_observations;
+    const sites =
+      observations !== null &&
+      typeof observations === "object" &&
+      !Array.isArray(observations) &&
+      Array.isArray(observations.call_references)
+        ? observations.call_references
+        : [];
+    expect(sites[0]).not.toHaveProperty("name");
+    expect(sites[0]).not.toHaveProperty("body");
     expect(first.value.rawResult).not.toHaveProperty(
       "native_result.instructions",
     );
+  }
   expect(second.ok && second.value.result).toMatchObject({
     references: [edge],
   });
@@ -137,6 +163,68 @@ it("builds one forward index for successive queries in a workflow", async () => 
     callTool.mock.calls.filter(([method]) => method === "rea_caller_scan_page"),
   ).toHaveLength(4);
 });
+it("links each compact call site to its owning caller address", async () => {
+  const other = identity("0x5000");
+  const otherEdge = {
+    ...compactEdge,
+    source_address: "0x5004",
+    source_procedure: "caller" as const,
+  };
+  const callTool = vi.fn().mockImplementation((method: string) =>
+    Promise.resolve(
+      ok(
+        method === "rea_caller_scan_target"
+          ? reply(method)
+          : {
+              start: 0,
+              next: 2,
+              total: 2,
+              oversized: false,
+              items: [
+                { caller, callees: [], references: [compactEdge] },
+                {
+                  caller: other,
+                  callees: [target.address],
+                  references: [otherEdge],
+                },
+              ],
+            },
+      ),
+    ),
+  );
+  const result = await reconcileHopperCallers(
+    { callTool } as unknown as HopperClient,
+    "procedure_callers",
+    { procedure: "name" },
+    base,
+    undefined,
+    250,
+  );
+  expect(result.ok).toBe(true);
+  if (!result.ok) return;
+  expect(result.value.rawResult).toMatchObject({
+    forward_observations: {
+      callee_inventory_callers: [{ address: other.address }],
+      call_site_callers: [{ address: caller.address }],
+      call_references: [
+        {
+          caller_address: caller.address,
+          source_address: compactEdge.source_address,
+          source_procedure: caller.address,
+          target_address: compactEdge.target_address,
+        },
+        {
+          caller_address: other.address,
+          source_address: otherEdge.source_address,
+          source_procedure: other.address,
+          target_address: otherEdge.target_address,
+        },
+      ],
+    },
+  });
+  expect(result.value.result).toEqual([other.address, caller.address]);
+});
+
 it("merges paged call sites and pins the selected target", async () => {
   const callTool = vi
     .fn()

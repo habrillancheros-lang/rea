@@ -305,6 +305,35 @@ const omitInstructionPayload = (value: JsonValue): JsonValue => {
   return rest;
 };
 
+/**
+ * `source_procedure: "caller"` means the enclosing page item. Keep that
+ * owner's address on the site so the compact record does not depend on a
+ * separate inventory list or a copied identity.
+ */
+const compactCallReference = (
+  caller: Identity,
+  edge: CompactEdge,
+): {
+  readonly caller_address: string;
+  readonly source_address: string;
+  readonly target_address: string;
+  readonly source_procedure: string | null;
+  readonly target_procedure: string;
+  readonly call?: CompactEdge["call"];
+} => ({
+  caller_address: caller.address,
+  source_address: edge.source_address,
+  target_address: edge.target_address,
+  source_procedure:
+    edge.source_procedure === null || edge.source_procedure === "caller"
+      ? edge.source_procedure === "caller"
+        ? caller.address
+        : null
+      : edge.source_procedure.address,
+  target_procedure: edge.target_procedure,
+  ...(edge.call === undefined ? {} : { call: edge.call }),
+});
+
 /** One shared identity record; destinations cite addresses instead of copies. */
 const compactForwardDestinations = (
   destinations: Map<string, Destination>,
@@ -330,16 +359,7 @@ const compactForwardDestinations = (
           edge.source_procedure !== "caller"
         )
           remember(edge.source_procedure);
-        return {
-          caller_address: caller.address,
-          source_address: edge.source_address,
-          target_address: edge.target_address,
-          source_procedure:
-            edge.source_procedure === null || edge.source_procedure === "caller"
-              ? edge.source_procedure
-              : edge.source_procedure.address,
-          call: edge.call,
-        };
+        return compactCallReference(caller, edge);
       }),
     };
   });
@@ -597,7 +617,17 @@ export const reconcileHopperCallers = async (
     return bytes;
   };
   const retainedNativeResult = omitInstructionPayload(original);
-  const compactReferences = selectedReferences.map(({ edge }) => edge);
+  const compactReferences = selectedReferences.map(({ caller, edge }) =>
+    compactCallReference(caller, edge),
+  );
+  const inventoryCallers = selectedDestination?.callers ?? new Map();
+  const siteCallers = new Map<string, Identity>();
+  for (const { caller } of selectedReferences)
+    if (
+      !inventoryCallers.has(caller.address) &&
+      !siteCallers.has(caller.address)
+    )
+      siteCallers.set(caller.address, caller);
   if (
     operation !== "procedure_callers" &&
     expandedReferenceBytes() > HOPPER_CALLER_SCAN_RETENTION_BYTES
@@ -707,6 +737,7 @@ export const reconcileHopperCallers = async (
         callee_inventory_callers: [
           ...(selectedDestination?.callers.values() ?? []),
         ],
+        call_site_callers: [...siteCallers.values()],
         call_references: compactReferences,
         provenance:
           "hopper-public-python-api:getAllCalleeProcedures and CallReference",
