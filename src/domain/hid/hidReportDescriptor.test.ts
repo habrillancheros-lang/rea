@@ -6,62 +6,227 @@ import {
 
 describe("HID Report Descriptor Parser", () => {
   it("decodes standard keyboard input report descriptor items", () => {
-    // Standard keyboard descriptor snippet:
-    // 0x05, 0x01: Usage Page (Generic Desktop)
-    // 0x09, 0x06: Usage (Keyboard)
-    // 0xA1, 0x01: Collection (Application)
-    // 0x85, 0x01: Report ID (1)
-    // 0x05, 0x07: Usage Page (Key Codes)
-    // 0x19, 0xE0: Usage Minimum (224)
-    // 0x29, 0xE7: Usage Maximum (231)
-    // 0x15, 0x00: Logical Minimum (0)
-    // 0x25, 0x01: Logical Maximum (1)
-    // 0x75, 0x01: Report Size (1 bit)
-    // 0x95, 0x08: Report Count (8)
-    // 0x81, 0x02: Input (Data, Variable, Absolute)
-    // 0xC0: End Collection
     const descriptor = [
-      0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x85, 0x01, 0x05, 0x07, 0x19, 0xe0,
-      0x29, 0xe7, 0x15, 0x00, 0x25, 0x01, 0x75, 0x01, 0x95, 0x08, 0x81, 0x02,
-      0xc0,
+      0x05,
+      0x01, // Usage Page (Generic Desktop)
+      0x09,
+      0x06, // Usage (Keyboard)
+      0xa1,
+      0x01, // Collection (Application)
+      0x85,
+      0x01, // Report ID (1)
+      0x05,
+      0x07, // Usage Page (Key Codes)
+      0x19,
+      0xe0, // Usage Minimum (224)
+      0x29,
+      0xe7, // Usage Maximum (231)
+      0x15,
+      0x00, // Logical Minimum (0)
+      0x25,
+      0x01, // Logical Maximum (1)
+      0x75,
+      0x01, // Report Size (1 bit)
+      0x95,
+      0x08, // Report Count (8)
+      0x81,
+      0x02, // Input (Data, Variable, Absolute)
+      0xc0, // End Collection
     ];
 
     const result = parseHidReportDescriptor(descriptor);
-    expect(result.items.length).toBeGreaterThan(5);
-    expect(result.reports.length).toBe(1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.reason);
 
-    const report = result.reports[0];
+    expect(result.value.items.length).toBeGreaterThan(5);
+    expect(result.value.reports.length).toBe(1);
+
+    const report = result.value.reports[0];
     if (!report) throw new Error("Expected input report");
     expect(report.reportId).toBe(1);
     expect(report.reportType).toBe("input");
     expect(report.usagePage).toBe(0x07);
     expect(report.reportSizeBits).toBe(1);
     expect(report.reportCount).toBe(8);
-    // 8 bits = 1 byte payload + 1 byte report ID = 2 bytes total
+    // 8 bits payload + 1 byte report ID = 2 bytes total
     expect(report.totalSizeBytes).toBe(2);
+    // Issue 6: Collection usage does not leak into modifier field
+    expect(report.fields[0]?.usage).toBeNull();
+    expect(report.fields[0]?.usageMin).toBe(0xe0);
+    expect(report.fields[0]?.usageMax).toBe(0xe7);
+  });
+
+  it("accumulates multiple field groups into a single endpoint report (Issue 5)", () => {
+    // Report ID 1 has two 8-bit Input groups (modifier byte + keycode byte)
+    const multiFieldDescriptor = [
+      0x05,
+      0x01, // Usage Page (Generic Desktop)
+      0x09,
+      0x06, // Usage (Keyboard)
+      0xa1,
+      0x01, // Collection (Application)
+      0x85,
+      0x01, // Report ID (1)
+      0x75,
+      0x08, // Report Size (8 bits)
+      0x95,
+      0x01, // Report Count (1)
+      0x81,
+      0x02, // Input 1
+      0x75,
+      0x08, // Report Size (8 bits)
+      0x95,
+      0x01, // Report Count (1)
+      0x81,
+      0x02, // Input 2
+      0xc0, // End Collection
+    ];
+
+    const result = parseHidReportDescriptor(multiFieldDescriptor);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.reason);
+
+    // Accumulated into single Input report under Report ID 1
+    expect(result.value.reports.length).toBe(1);
+    const report = result.value.reports[0];
+    if (!report) throw new Error("Expected input report");
+    expect(report.reportId).toBe(1);
+    // 16 bits (2 bytes) payload + 1 byte report ID = 3 bytes total
+    expect(report.totalBits).toBe(16);
+    expect(report.totalSizeBytes).toBe(3);
+    expect(report.fields.length).toBe(2);
+    expect(report.fields[0]?.bitOffset).toBe(0);
+    expect(report.fields[1]?.bitOffset).toBe(8);
+  });
+});
+
+describe("HID Report Descriptor Advanced Features", () => {
+  it("handles Push and Pop global item stack (Issue 7)", () => {
+    const pushPopDescriptor = [
+      0x85,
+      0x01, // Report ID (1)
+      0x75,
+      0x08, // Report Size (8 bits)
+      0xa4, // Push
+      0x85,
+      0x02, // Report ID (2)
+      0x75,
+      0x10, // Report Size (16 bits)
+      0xb4, // Pop (restores Report ID 1, Report Size 8)
+      0x95,
+      0x01, // Report Count (1)
+      0x81,
+      0x02, // Input
+    ];
+
+    const result = parseHidReportDescriptor(pushPopDescriptor);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.reason);
+
+    expect(result.value.reports.length).toBe(1);
+    const report = result.value.reports[0];
+    if (!report) throw new Error("Expected input report");
+    // Pop restored Report ID 1 and Report Size 8
+    expect(report.reportId).toBe(1);
+    expect(report.reportSizeBits).toBe(8);
+  });
+
+  it("skips 0xFE long-item payloads without corrupting item parsing (Issue 8)", () => {
+    // Long item tag 0x01 with 2 payload bytes (0x85, 0x07) that must NOT set Report ID to 7
+    const longItemDescriptor = [
+      0x85,
+      0x01, // Report ID (1)
+      0xfe,
+      0x02,
+      0x01,
+      0x85,
+      0x07, // Long item with 2 bytes payload
+      0x75,
+      0x08, // Report Size (8 bits)
+      0x95,
+      0x01, // Report Count (1)
+      0x81,
+      0x02, // Input
+    ];
+
+    const result = parseHidReportDescriptor(longItemDescriptor);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.reason);
+
+    expect(result.value.reports.length).toBe(1);
+    const report = result.value.reports[0];
+    if (!report) throw new Error("Expected input report");
+    expect(report.reportId).toBe(1); // Not 7!
+  });
+
+  it("returns failure on truncated descriptor items (Issue 9)", () => {
+    // Item 0x81 (Input) requires 1 byte of flags, but ends prematurely
+    const truncated = [0x75, 0x08, 0x95, 0x01, 0x81];
+    const result = parseHidReportDescriptor(truncated);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected failure on truncated item");
+    expect(result.error.reason).toContain("truncated item 0x81");
+  });
+
+  it("preserves 4-byte unsigned usages without signed 32-bit negative hex (Issue 10)", () => {
+    // 4-byte usage 0xFF130001: bTag 0 (Usage), bType 2 (Local), bSize 3 (4 bytes) => 0x0B
+    const fourByteUsage = [
+      0x05,
+      0x01, // Usage Page (Generic Desktop)
+      0x0b,
+      0x01,
+      0x00,
+      0x13,
+      0xff, // Usage (0xFF130001)
+      0x75,
+      0x08,
+      0x95,
+      0x01,
+      0x81,
+      0x02,
+    ];
+
+    const result = parseHidReportDescriptor(fourByteUsage);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.reason);
+
+    const report = result.value.reports[0];
+    if (!report) throw new Error("Expected report");
+    expect(report.usage).toBe(0xff130001);
+    expect(report.usageHex).toBe("0xFF130001");
   });
 
   it("identifies custom hardware vendor usage pages (e.g. 0xFF13 for Aula keyboard configuration)", () => {
-    // Custom vendor feature report snippet:
-    // 0x06, 0x13, 0xFF: Usage Page (Vendor Defined 0xFF13)
-    // 0x09, 0x01: Usage (1)
-    // 0xA1, 0x01: Collection (Application)
-    // 0x15, 0x00: Logical Minimum (0)
-    // 0x26, 0xFF, 0x00: Logical Maximum (255)
-    // 0x75, 0x08: Report Size (8 bits)
-    // 0x95, 0x40: Report Count (64 bytes)
-    // 0xB1, 0x02: Feature (Data, Variable, Absolute)
-    // 0xC0: End Collection
     const vendorDescriptor = [
-      0x06, 0x13, 0xff, 0x09, 0x01, 0xa1, 0x01, 0x15, 0x00, 0x26, 0xff, 0x00,
-      0x75, 0x08, 0x95, 0x40, 0xb1, 0x02, 0xc0,
+      0x06,
+      0x13,
+      0xff, // Usage Page (Vendor Defined 0xFF13)
+      0x09,
+      0x01, // Usage (1)
+      0xa1,
+      0x01, // Collection (Application)
+      0x15,
+      0x00, // Logical Minimum (0)
+      0x26,
+      0xff,
+      0x00, // Logical Maximum (255)
+      0x75,
+      0x08, // Report Size (8 bits)
+      0x95,
+      0x40, // Report Count (64 bytes)
+      0xb1,
+      0x02, // Feature (Data, Variable, Absolute)
+      0xc0, // End Collection
     ];
 
     const result = parseHidReportDescriptor(vendorDescriptor);
-    expect(result.vendorUsagePages).toContain("0xFF13");
-    expect(result.reports.length).toBe(1);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.reason);
 
-    const feature = result.reports[0];
+    expect(result.value.vendorUsagePages).toContain("0xFF13");
+    expect(result.value.reports.length).toBe(1);
+
+    const feature = result.value.reports[0];
     if (!feature) throw new Error("Expected feature report");
     expect(feature.reportType).toBe("feature");
     expect(feature.usagePage).toBe(0xff13);

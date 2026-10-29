@@ -43,11 +43,11 @@ export const ghidraReleaseCompatibility = (
   if (raw === SUPPORTED_GHIDRA_VERSION)
     return { status: "verified", version, raw };
   const verified = verifiedGhidraRelease();
-  // Admit the verified line and anything on this major: the observed
+  // Admit the verified line and anything newer on this major: the observed
   // version is reported on the provider identity and sessions run with the
-  // unverified-build limitation, so releases like 12.0.x or 12.2 are usable
+  // unverified-build limitation, so a newer release like 12.2 is usable
   // while the verified build stays pinned.
-  return version.major === verified.major && version.minor >= 0
+  return version.major === verified.major && version.minor >= verified.minor
     ? { status: "compatible", version, raw }
     : { status: "unsupported", version, raw };
 };
@@ -64,10 +64,10 @@ export const unverifiedGhidraBuildLimitation = (
   return `This session uses Ghidra ${providerVersion}. The bridge is verified against ${SUPPORTED_GHIDRA_VERSION}; other ${ghidraReleaseLine()} builds are accepted and the observed version is reported.`;
 };
 
-/** Accepted release floor on this major, such as `12.x (>=12.0)`. */
+/** Accepted release floor on this major, such as `12.x (>=12.1)`. */
 export const ghidraReleaseLine = (): string => {
   const verified = verifiedGhidraRelease();
-  return `${String(verified.major)}.x (>=${String(verified.major)}.0)`;
+  return `${String(verified.major)}.x (>=${String(verified.major)}.${String(verified.minor)})`;
 };
 
 /** Detail for the installation version check, including the accepted line. */

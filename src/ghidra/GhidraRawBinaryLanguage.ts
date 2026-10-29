@@ -12,7 +12,7 @@ export interface GhidraRawBinaryLanguage {
  * supported generic compiler specification. These are analysis conventions,
  * not evidence of the target's original compiler. Each family has one fixed
  * byte order: m68k is big-endian and the others are little-endian. Big-endian
- * ARM, Thumb-only, Cortex-M, and other processor variants are out of scope.
+ * ARM, non-Cortex-M Thumb-only variants, and other processor variants are out of scope.
  */
 export const ghidraRawBinaryLanguage = (
   architecture: RawBinaryAdmission["architecture"],

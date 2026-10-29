@@ -176,11 +176,11 @@ describe("raw-binary admission", () => {
 });
 
 describe("cortex-m raw-binary admission", () => {
-  it("admits 32-bit Cortex-M images with even or Thumb-bit entry points", () => {
+  it("admits 32-bit Cortex-M images with even entry points", () => {
     for (const [entryPoint, fileBytes] of [
       ["0x0", 262144],
       ["0x4000", 65536],
-      ["0x4001", 65536], // Thumb mode bit set
+      ["0x8000000", 131072],
     ] as const) {
       const result = admitRawBinary({
         architecture: "cortex-m",
@@ -194,6 +194,19 @@ describe("cortex-m raw-binary admission", () => {
         entryPointSource: entryPoint,
       });
     }
+  });
+
+  it("rejects odd entry points that violate 2-byte instruction alignment", () => {
+    const result = admitRawBinary({
+      architecture: "cortex-m",
+      entryPoint: "0x4001",
+      fileBytes: 65536,
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected odd entry point to fail");
+    expect(result.error.reason).toContain(
+      "raw-binary cortex-m entry_point 0x4001 must be 2-byte aligned",
+    );
   });
 });
 

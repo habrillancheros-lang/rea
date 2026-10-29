@@ -126,8 +126,8 @@ export const admitRawBinary = (input: {
       reason: `raw-binary m68k entry_point ${entry.value.canonical} must be 2-byte aligned`,
       constraint: "load_selection_rejected",
     });
-  // Cortex-M Thumb instructions are 16-bit aligned (with optional +1 Thumb mode bit).
-  if (architecture.data === "cortex-m" && (entry.value.value & ~1n) % 2n !== 0n)
+  // Cortex-M Thumb instructions are 16-bit aligned (even load address).
+  if (architecture.data === "cortex-m" && entry.value.value % 2n !== 0n)
     return err({
       reason: `raw-binary cortex-m entry_point ${entry.value.canonical} must be 2-byte aligned`,
       constraint: "load_selection_rejected",
