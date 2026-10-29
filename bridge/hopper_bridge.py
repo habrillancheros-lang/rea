@@ -22,6 +22,9 @@ HOPPER_SYMBOL_NAME_UTF16_UNITS = 1024
 # that does not fit is null, not an older descriptor path.
 # 536870887 is Node's 536870888-character string ceiling minus the framing LF.
 # The ceiling is the encoded payload; JSON expansion is measured before it.
+# Encoded JSON allowance, in bytes, shared by one instruction list, one
+# native-caller list, and one caller-scan page. This release has no runtime override.
+CALLER_SCAN_ALLOWANCE_BYTES = 512 * 1024
 _BRIDGE_MAX_REQUEST_BYTES_SETTING = "REA_BRIDGE_MAX_REQUEST_BYTES"
 DEFAULT_BRIDGE_MAX_REQUEST_BYTES = 16 * 1024 * 1024
 MINIMUM_BRIDGE_MAX_REQUEST_BYTES = 7464
@@ -571,7 +574,7 @@ def _caller_target_data(procedure):
                 continue
             encoded = _hex(address)
             size += len(encoded) + 4
-            if size > 512 * 1024:
+            if size > CALLER_SCAN_ALLOWANCE_BYTES:
                 return {"target": _procedure_identity(procedure), "instructions": addresses, "instructions_complete": False}
             addresses.append(encoded)
             seen.add(address)
@@ -590,7 +593,7 @@ def _caller_base(document, params):
     for item in procedure.getAllCallerProcedures():
         address = _hex(item.getEntryPoint())
         size += len(address) + 4
-        if size > 512 * 1024:
+        if size > CALLER_SCAN_ALLOWANCE_BYTES:
             complete = False
             break
         callers.append(address)
@@ -614,7 +617,7 @@ def _caller_scan_page(document, params):
         raise InvalidRequestError("Caller scan start exceeds the procedure inventory")
     items = []
     item_bytes = 0
-    page_limit = 512 * 1024
+    page_limit = CALLER_SCAN_ALLOWANCE_BYTES
     oversized = False
     identities = {}
     containing = {}

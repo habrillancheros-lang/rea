@@ -466,7 +466,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
                     parameters,
                     mapped.value,
                     options,
-                    this.config.hopperCallerScanBudgetMs,
+                    this.config.hopperCallerScanBudget,
                   )
                 : undefined;
             if (reconciled !== undefined && !reconciled.ok) return reconciled;

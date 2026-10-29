@@ -4,6 +4,10 @@ import type { HopperClient } from "./HopperClient.js";
 import { reconcileHopperCallers } from "./HopperCallerReconciliation.js";
 import { AnalysisWorkScope } from "../application/AnalysisWorkScope.js";
 import { formatHopperCallerScanReason } from "../domain/native/hopperCallerReconciliation.js";
+import {
+  hopperCallerScanBudgetForMilliseconds,
+  hopperCallerScanRecovery,
+} from "../config/hopperCallerScanBudget.js";
 import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
 
 const identity = (address: string) => ({
@@ -373,7 +377,7 @@ it("retains original callers and reports a procedure that exceeds the page allow
     });
     if (result.value.scan === undefined) throw new Error("missing scan facts");
     expect(result.value.reason).toBe(
-      formatHopperCallerScanReason(result.value.scan),
+      `${formatHopperCallerScanReason(result.value.scan)} ${hopperCallerScanRecovery(result.value.scan, hopperCallerScanBudgetForMilliseconds(250))}`,
     );
   }
 });
@@ -403,7 +407,7 @@ it("reports truncated target instructions and native callers", async () => {
     });
     if (result.value.scan === undefined) throw new Error("missing scan facts");
     expect(result.value.reason).toBe(
-      formatHopperCallerScanReason(result.value.scan),
+      `${formatHopperCallerScanReason(result.value.scan)} ${hopperCallerScanRecovery(result.value.scan, hopperCallerScanBudgetForMilliseconds(250))}`,
     );
   }
 });

@@ -18,6 +18,11 @@ import { err, ok, type Result } from "../domain/result.js";
 import type { HopperClient } from "./HopperClient.js";
 import { analysisClientFailureForOperation } from "../providers/AnalysisClientFailure.js";
 import {
+  hopperCallerScanBudgetForMilliseconds,
+  hopperCallerScanRecovery,
+  type HopperCallerScanBudget,
+} from "../config/hopperCallerScanBudget.js";
+import {
   formatHopperCallerScanReason,
   hopperCallerReconciliationPartialSchema,
   HOPPER_CALLER_PAGE_ALLOWANCE_BYTES,
@@ -340,7 +345,7 @@ export const reconcileHopperCallers = async (
   parameters: Readonly<Record<string, JsonValue>>,
   original: JsonValue,
   options: ExecutionOptions | undefined,
-  budgetMs: number,
+  budget: number | HopperCallerScanBudget,
 ): Promise<
   Result<
     {
@@ -352,6 +357,16 @@ export const reconcileHopperCallers = async (
     AnalysisError
   >
 > => {
+  const scanBudget =
+    typeof budget === "number"
+      ? hopperCallerScanBudgetForMilliseconds(budget)
+      : budget;
+  const budgetMs = scanBudget.milliseconds;
+  const describeScan = (facts: HopperCallerScanFacts): string => {
+    const observed = formatHopperCallerScanReason(facts);
+    const recovery = hopperCallerScanRecovery(facts, scanBudget);
+    return recovery === "" ? observed : `${observed} ${recovery}`;
+  };
   const retainNative = (
     error: AnalysisError,
     partial: {
@@ -373,7 +388,7 @@ export const reconcileHopperCallers = async (
         reason:
           partial.scan === null
             ? "Hopper caller reconciliation did not examine the procedure inventory; unexamined procedure relationships are unknown."
-            : formatHopperCallerScanReason(partial.scan),
+            : describeScan(partial.scan),
         limited_directions:
           operation === "analyze_function"
             ? ["callers", "callees"]
@@ -614,6 +629,6 @@ export const reconcileHopperCallers = async (
       },
     },
     scan,
-    reason: formatHopperCallerScanReason(scan),
+    reason: describeScan(scan),
   });
 };

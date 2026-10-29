@@ -68,11 +68,11 @@ const stopDetail = (stop: HopperCallerScanStop): string => {
     case "complete":
       return "";
     case "work_budget":
-      return `the ${String(stop.budget_ms)} ms reconciliation work budget was reached; set REA_HOPPER_CALLER_SCAN_BUDGET_MS and restart REA to change it`;
+      return `the ${String(stop.budget_ms)} ms reconciliation work budget was reached`;
     case "inventory_changed":
       return "the procedure inventory changed during reconciliation";
     case "page_allowance":
-      return "a single procedure exceeded the 512 KiB page allowance";
+      return `a single procedure exceeded the ${String(HOPPER_CALLER_PAGE_ALLOWANCE_BYTES)} byte page allowance`;
     case "retention_budget":
       return `the ${String(stop.allowance_bytes)} byte reconciliation retention budget was reached`;
     case "cancelled":
@@ -95,9 +95,8 @@ export const formatHopperCallerScanReason = (
   const detail = stopDetail(facts.stop);
   let reason = `Hopper caller reconciliation examined ${String(facts.examined_procedures)} of ${total} procedures and retained ${String(facts.retained_bytes)} encoded bytes${detail === "" ? "" : `; ${detail}`}. Forward and reverse API coverage and consistency during the live scan remain unknown.`;
   if (!facts.instructions_complete)
-    reason +=
-      " Target instruction enumeration reached the 512 KiB allowance; incoming call-site coverage is incomplete.";
+    reason += ` Target instruction enumeration reached the ${String(HOPPER_CALLER_PAGE_ALLOWANCE_BYTES)} byte allowance; incoming call-site coverage is incomplete.`;
   if (facts.native_callers_complete === false)
-    reason += " Native caller enumeration reached the 512 KiB allowance.";
+    reason += ` Native caller enumeration reached the ${String(HOPPER_CALLER_PAGE_ALLOWANCE_BYTES)} byte allowance.`;
   return reason;
 };
