@@ -9,7 +9,9 @@ import {
 import { NativeMacOSProvider } from "./NativeMacOSProvider.js";
 import type { NativeCallTracer } from "./LldbCallTracer.js";
 import { NativeCommandFailure } from "./CommandRunner.js";
-import { err } from "../domain/result.js";
+import { inspectMachoSchema } from "../domain/native/nativeInspection.js";
+import { err, ok } from "../domain/result.js";
+import { VTOOL_CONTAINER_REFUSAL_LIMITATION } from "./NativeMachoInspection.js";
 
 const targetDirectories: string[] = [];
 afterEach(async () => {
@@ -95,6 +97,69 @@ describe("private otool operand lifecycle", () => {
       expect(calls.some(({ operand }) => operand === alias)).toBe(true);
       expect(calls.some(({ operand }) => operand === target)).toBe(false);
       await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await client.close();
+      await rm(path, { recursive: true, force: true });
+      await rm(selected.directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps completed Mach-O facts when vtool refuses the private alias", async () => {
+    const path = await mkdtemp(join(tmpdir(), "rea-macho-operand-test-"));
+    const selected = await parenthesizedTarget();
+    const target = selected.target.path;
+    const alias = join(path, "artifact.macho");
+    const fixture = new NativeFixtureRunner();
+    const runner = {
+      async run(tool: string, args: readonly string[]) {
+        const captured = await fixture.run(tool, args);
+        if (!captured.ok || tool !== "vtool") return captured;
+        const operand = args.at(-1);
+        const stderr = `/usr/bin/vtool error: ${operand} file is not mach-o\n`;
+        return ok({
+          ...captured.value,
+          stdout: "",
+          stdoutBytes: 0,
+          stderr,
+          stderrBytes: Buffer.byteLength(stderr),
+          exitCode: 1,
+          signal: null,
+        });
+      },
+    };
+    const client = new NativeMacOSProvider(
+      {},
+      runner,
+      "darwin",
+      () => tracer,
+      async () => ({
+        path,
+        close: async () => {
+          await rm(path, { recursive: true, force: true });
+        },
+      }),
+    ).createClient(selected.target);
+    try {
+      const result = await client.execute("inspect_macho", {});
+      if (!result.ok) throw result.error;
+      const report = inspectMachoSchema.parse(result.value.result);
+      expect(report).toMatchObject({
+        format: "mach-o-universal",
+        selected_architecture: {
+          name: "arm64",
+          container_file_offset: 32_768,
+        },
+      });
+      const vtool = report.provenance.find((entry) => entry.tool === "vtool");
+      expect(vtool).toMatchObject({
+        exit: { code: 1, signal: null },
+      });
+      expect(vtool?.command.at(-1)).toBe(alias);
+      expect(report.limitations).toContain(VTOOL_CONTAINER_REFUSAL_LIMITATION);
+      expect(
+        report.provenance.find((entry) => entry.tool === "lipo"),
+      ).toMatchObject({ exit: { code: 0, signal: null } });
+      expect(target.endsWith("app(foo)")).toBe(true);
     } finally {
       await client.close();
       await rm(path, { recursive: true, force: true });

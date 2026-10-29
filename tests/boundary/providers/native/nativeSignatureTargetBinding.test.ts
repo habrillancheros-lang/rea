@@ -531,15 +531,28 @@ it.skipIf(process.platform !== "darwin")(
       return name;
     };
     const selectedArchitecture = toolName(target.architecture);
+    const universal = target.format === "mach-o-universal";
+    if (!universal && target.format !== "mach-o")
+      throw new Error(`Unexpected Mach-O format ${target.format}`);
+    const selector = (command: readonly string[], required: boolean) => {
+      const index = command.indexOf("-a");
+      if (!required) {
+        expect(index).toBe(-1);
+        return null;
+      }
+      if (index < 0)
+        throw new Error("codesign omitted -a for a universal slice");
+      return command[index + 1];
+    };
     expect(
-      parsed.provenance.map(
-        ({ command }) => command[command.indexOf("-a") + 1],
+      parsed.provenance.map(({ command }, index) =>
+        selector(command, universal || index >= 3),
       ),
     ).toEqual([
-      selectedArchitecture,
-      selectedArchitecture,
-      selectedArchitecture,
-      ...(target.availableArchitectures.length > 1
+      ...(universal
+        ? [selectedArchitecture, selectedArchitecture, selectedArchitecture]
+        : [null, null, null]),
+      ...(universal && target.availableArchitectures.length > 1
         ? target.availableArchitectures.map(toolName)
         : []),
     ]);
