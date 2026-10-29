@@ -345,8 +345,7 @@ describe("Hopper caller reconciliation failures", () => {
       const observed = await client.execute("procedure_callers", {
         procedure: "0x1000",
       });
-      expect(observed.ok).toBe(false);
-      if (observed.ok) return;
+      if (observed.ok) throw new Error("expected procedure_callers to fail");
       expect(observed.error.partialObservation).toMatchObject({
         kind: "hopper-caller-reconciliation",
         native_result: native,

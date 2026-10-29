@@ -30,8 +30,7 @@ const facts = (
 
 it("records the default caller-scan budget and forwards an explicit setting", () => {
   const unset = parseConfig({});
-  expect(unset.ok).toBe(true);
-  if (!unset.ok) return;
+  if (!unset.ok) throw unset.error;
   expect(unset.value.hopperCallerScanBudget).toMatchObject({
     milliseconds: DEFAULT_HOPPER_CALLER_SCAN_BUDGET_MS,
     source: "default",
@@ -41,8 +40,7 @@ it("records the default caller-scan budget and forwards an explicit setting", ()
   const selected = parseConfig({
     [HOPPER_CALLER_SCAN_BUDGET_SETTING]: "250",
   });
-  expect(selected.ok).toBe(true);
-  if (!selected.ok) return;
+  if (!selected.ok) throw selected.error;
   expect(selected.value.hopperCallerScanBudget).toMatchObject({
     milliseconds: 250,
     source: "setting",
@@ -57,7 +55,7 @@ it("records the default caller-scan budget and forwards an explicit setting", ()
 
 it("explains the time budget and that fixed byte allowances have no override", () => {
   const parsed = parseConfig({ [HOPPER_CALLER_SCAN_BUDGET_SETTING]: "250" });
-  if (!parsed.ok) throw new Error("Expected a parsed scan budget");
+  if (!parsed.ok) throw parsed.error;
   const budget = parsed.value.hopperCallerScanBudget;
   const time = hopperCallerScanRecovery(
     facts({ stop: { code: "work_budget", budget_ms: 250 } }),

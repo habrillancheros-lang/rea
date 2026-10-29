@@ -104,28 +104,27 @@ it("builds one forward index for successive queries in a workflow", async () => 
     options,
     250,
   );
-  expect(first.ok && first.value.result).toEqual(["0x3000"]);
-  if (first.ok)
-    expect(first.value.rawResult).toMatchObject({
-      native_result: { callers: [] },
-      forward_observations: {
-        target: { address: "0x2000" },
-        callee_inventory_callers: [{ address: "0x3000" }],
-        call_references: [
-          {
-            caller_address: caller.address,
-            source_address: compactEdge.source_address,
-            target_address: compactEdge.target_address,
-            source_procedure: caller.address,
-            target_procedure: compactEdge.target_procedure,
-            call: compactEdge.call,
-          },
-        ],
-        call_site_callers: [],
-      },
-    });
+  if (!first.ok) throw first.error;
+  expect(first.value.result).toEqual(["0x3000"]);
+  expect(first.value.rawResult).toMatchObject({
+    native_result: { callers: [] },
+    forward_observations: {
+      target: { address: "0x2000" },
+      callee_inventory_callers: [{ address: "0x3000" }],
+      call_references: [
+        {
+          caller_address: caller.address,
+          source_address: compactEdge.source_address,
+          target_address: compactEdge.target_address,
+          source_procedure: caller.address,
+          target_procedure: compactEdge.target_procedure,
+          call: compactEdge.call,
+        },
+      ],
+      call_site_callers: [],
+    },
+  });
   if (
-    first.ok &&
     first.value.rawResult !== null &&
     typeof first.value.rawResult === "object" &&
     !Array.isArray(first.value.rawResult)
@@ -144,7 +143,8 @@ it("builds one forward index for successive queries in a workflow", async () => 
       "native_result.instructions",
     );
   }
-  expect(second.ok && second.value.result).toMatchObject({
+  if (!second.ok) throw second.error;
+  expect(second.value.result).toMatchObject({
     references: [edge],
   });
   expect(
@@ -200,8 +200,7 @@ it("links each compact call site to its owning caller address", async () => {
     undefined,
     250,
   );
-  expect(result.ok).toBe(true);
-  if (!result.ok) return;
+  if (!result.ok) throw result.error;
   expect(result.value.rawResult).toMatchObject({
     forward_observations: {
       callee_inventory_callers: [{ address: other.address }],
@@ -240,8 +239,7 @@ it("merges paged call sites and pins the selected target", async () => {
     undefined,
     250,
   );
-  expect(result.ok).toBe(true);
-  if (!result.ok) return;
+  if (!result.ok) throw result.error;
   expect(result.value.result).toMatchObject({ references: [edge] });
   expect(result.value.scan).toMatchObject({
     examined_procedures: 65,
@@ -296,7 +294,8 @@ it("does not reuse a previous scan", async () => {
     undefined,
     250,
   );
-  expect(changed.ok && changed.value.result).toEqual([]);
+  if (!changed.ok) throw changed.error;
+  expect(changed.value.result).toEqual([]);
 });
 it("stops between pages on cancellation", async () => {
   const controller = new AbortController();
@@ -312,21 +311,19 @@ it("stops between pages on cancellation", async () => {
     { signal: controller.signal },
     250,
   );
-  expect(result.ok).toBe(false);
-  if (!result.ok) {
-    expect(result.error._tag).toBe("AnalysisCancelledError");
-    expect(result.error.cause).toBe("test cancellation");
-    expect(result.error.partialObservation).toMatchObject({
-      kind: "hopper-caller-reconciliation",
-      native_result: base,
-      coverage: { status: "unknown" },
-      scan: {
-        examined_procedures: 64,
-        procedure_total: 65,
-        stop: { code: "cancelled" },
-      },
-    });
-  }
+  if (result.ok) throw new Error("expected the caller scan to fail");
+  expect(result.error._tag).toBe("AnalysisCancelledError");
+  expect(result.error.cause).toBe("test cancellation");
+  expect(result.error.partialObservation).toMatchObject({
+    kind: "hopper-caller-reconciliation",
+    native_result: base,
+    coverage: { status: "unknown" },
+    scan: {
+      examined_procedures: 64,
+      procedure_total: 65,
+      stop: { code: "cancelled" },
+    },
+  });
   expect(callTool).toHaveBeenCalledTimes(1);
 });
 it("preserves cancellation while reporting the last page", async () => {
@@ -355,29 +352,27 @@ it("preserves cancellation while reporting the last page", async () => {
     { signal: controller.signal, progress },
     250,
   );
-  expect(result.ok).toBe(false);
-  if (!result.ok) {
-    expect(result.error.cause).toBe("cancelled in progress");
-    expect(result.error.partialObservation).toMatchObject({
-      kind: "hopper-caller-reconciliation",
-      native_result: base,
-      coverage: { status: "unknown" },
-      scan: {
-        examined_procedures: 1,
-        procedure_total: 1,
-        stop: { code: "cancelled" },
-      },
-      forward_destinations: {
-        identities: [expect.objectContaining({ address: caller.address })],
-        destinations: [
-          expect.objectContaining({
-            address: target.address,
-            caller_addresses: [caller.address],
-          }),
-        ],
-      },
-    });
-  }
+  if (result.ok) throw new Error("expected the caller scan to fail");
+  expect(result.error.cause).toBe("cancelled in progress");
+  expect(result.error.partialObservation).toMatchObject({
+    kind: "hopper-caller-reconciliation",
+    native_result: base,
+    coverage: { status: "unknown" },
+    scan: {
+      examined_procedures: 1,
+      procedure_total: 1,
+      stop: { code: "cancelled" },
+    },
+    forward_destinations: {
+      identities: [expect.objectContaining({ address: caller.address })],
+      destinations: [
+        expect.objectContaining({
+          address: target.address,
+          caller_addresses: [caller.address],
+        }),
+      ],
+    },
+  });
 });
 it("retains completed pages when a later scan page fails", async () => {
   let pages = 0;
@@ -400,8 +395,8 @@ it("retains completed pages when a later scan page fails", async () => {
     undefined,
     250,
   );
-  expect(result.ok).toBe(false);
-  if (result.ok) return;
+  if (result.ok) throw new Error("expected the caller scan to fail");
+  expect(result.error).toMatchObject({ _tag: "AnalysisOutputError" });
   expect(result.error.partialObservation).toMatchObject({
     kind: "hopper-caller-reconciliation",
     native_result: base,
@@ -433,8 +428,7 @@ it("reports a changing inventory as incomplete", async () => {
     undefined,
     250,
   );
-  expect(result.ok).toBe(true);
-  if (!result.ok) return;
+  if (!result.ok) throw result.error;
   expect(result.value.scan).toMatchObject({
     examined_procedures: 64,
     procedure_total: 65,
@@ -460,22 +454,20 @@ it("retains original callers and reports a procedure that exceeds the page allow
     undefined,
     250,
   );
-  expect(result.ok).toBe(true);
-  if (result.ok) {
-    expect(result.value.result).toEqual(["0x1000"]);
-    expect(result.value.scan).toMatchObject({
-      examined_procedures: 0,
-      procedure_total: 65,
-      stop: {
-        code: "page_allowance",
-        allowance_bytes: 512 * 1024,
-      },
-    });
-    if (result.value.scan === undefined) throw new Error("missing scan facts");
-    expect(result.value.reason).toBe(
-      `${formatHopperCallerScanReason(result.value.scan)} ${hopperCallerScanRecovery(result.value.scan, hopperCallerScanBudgetForMilliseconds(250))}`,
-    );
-  }
+  if (!result.ok) throw result.error;
+  expect(result.value.result).toEqual(["0x1000"]);
+  expect(result.value.scan).toMatchObject({
+    examined_procedures: 0,
+    procedure_total: 65,
+    stop: {
+      code: "page_allowance",
+      allowance_bytes: 512 * 1024,
+    },
+  });
+  if (result.value.scan === undefined) throw new Error("missing scan facts");
+  expect(result.value.reason).toBe(
+    `${formatHopperCallerScanReason(result.value.scan)} ${hopperCallerScanRecovery(result.value.scan, hopperCallerScanBudgetForMilliseconds(250))}`,
+  );
 });
 
 it("refuses expanded reference copies that exceed the retained scan budget", async () => {
@@ -517,8 +509,7 @@ it("refuses expanded reference copies that exceed the retained scan budget", asy
     undefined,
     250,
   );
-  expect(result.ok).toBe(false);
-  if (result.ok) return;
+  if (result.ok) throw new Error("expected the caller scan to fail");
   expect(result.error).toBeInstanceOf(AnalysisResourceConstraintError);
   expect(result.error).toMatchObject({
     _tag: "AnalysisResourceConstraintError",
@@ -552,18 +543,16 @@ it("reports truncated target instructions and native callers", async () => {
     undefined,
     250,
   );
-  expect(result.ok).toBe(true);
-  if (result.ok) {
-    expect(result.value.scan).toMatchObject({
-      examined_procedures: 0,
-      procedure_total: 0,
-      stop: { code: "complete" },
-      instructions_complete: false,
-      native_callers_complete: false,
-    });
-    if (result.value.scan === undefined) throw new Error("missing scan facts");
-    expect(result.value.reason).toBe(
-      `${formatHopperCallerScanReason(result.value.scan)} ${hopperCallerScanRecovery(result.value.scan, hopperCallerScanBudgetForMilliseconds(250))}`,
-    );
-  }
+  if (!result.ok) throw result.error;
+  expect(result.value.scan).toMatchObject({
+    examined_procedures: 0,
+    procedure_total: 0,
+    stop: { code: "complete" },
+    instructions_complete: false,
+    native_callers_complete: false,
+  });
+  if (result.value.scan === undefined) throw new Error("missing scan facts");
+  expect(result.value.reason).toBe(
+    `${formatHopperCallerScanReason(result.value.scan)} ${hopperCallerScanRecovery(result.value.scan, hopperCallerScanBudgetForMilliseconds(250))}`,
+  );
 });
