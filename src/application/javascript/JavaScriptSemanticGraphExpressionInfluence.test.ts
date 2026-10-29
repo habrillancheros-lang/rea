@@ -322,6 +322,23 @@ it("does not send an ignored literal argument to the call result", () => {
   );
 });
 
+it("keeps conditional binding candidates distinct from operand occurrences", () => {
+  const graph = graphForJavaScript('export const choice = flag ? 1 : "1";');
+  const choices = graph.nodes.filter(
+    (node) =>
+      node.kind === "literal" &&
+      (node.properties.value === 1 || node.properties.value === "1"),
+  );
+  expect(choices).toHaveLength(4);
+  expect(
+    new Set(
+      choices.map((node) =>
+        JSON.stringify([node.properties.value, node.identity.source_range]),
+      ),
+    ).size,
+  ).toBe(4);
+});
+
 it("projects repeated operator literals with indexed lookup", () => {
   const count = 1_200;
   const declarations = Array.from(
