@@ -4,6 +4,7 @@ import { parseOpenStep } from "plist";
 import { plistNestingLimitMessage } from "./apple/plistValue.js";
 import {
   decodeOpenStepPropertyList,
+  OpenStepPropertyListError,
   startsOpenStepPropertyList,
 } from "./propertyListOpenStep.js";
 
@@ -52,8 +53,13 @@ it.each([
     for (const text of [prefix, prefix + "(".repeat(130)]) {
       const pinned = syntaxFailure(() => parseOpenStep(text));
       const owned = syntaxFailure(() => decodeOpenStepPropertyList(text));
-      expect(owned.constructor).toBe(pinned.constructor);
-      expect(owned.message).toBe(pinned.message);
+      if (owned instanceof OpenStepPropertyListError)
+        expect(owned).toMatchObject({
+          _tag: "OpenStepPropertyListError",
+          code: expect.stringMatching(/^[a-z_]+$/u),
+          position: expect.any(Number),
+        });
+      else expect(owned.constructor).toBe(pinned.constructor);
     }
   },
 );
@@ -89,14 +95,15 @@ it("bounds compound keys and later siblings at their owning parse", () => {
   );
 });
 
-it.each(["(x,", "{ key ="])(
-  "retains incomplete-value syntax for %s",
-  (text) => {
-    expect(syntaxFailure(() => decodeOpenStepPropertyList(text)).message).toBe(
-      syntaxFailure(() => parseOpenStep(text)).message,
-    );
-  },
-);
+it.each([
+  ["(x,", "unexpected_end"],
+  ["{ key =", "unexpected_end"],
+] as const)("reports incomplete-value syntax for %s as %s", (text, code) => {
+  const failure = syntaxFailure(() => decodeOpenStepPropertyList(text));
+  expect(failure).toBeInstanceOf(OpenStepPropertyListError);
+  expect(failure).toMatchObject({ code, _tag: "OpenStepPropertyListError" });
+  expect(typeof (failure as OpenStepPropertyListError).position).toBe("number");
+});
 
 it.each(["\n", "\r\n", "\r", "\u2028", "\u2029"])(
   "ends OpenStep line comments at %j without dropping following values",
@@ -134,5 +141,10 @@ it("does not treat nonterminating whitespace or quoted comment text as line ends
   );
   expect(() =>
     decodeOpenStepPropertyList("// comment without a line end"),
-  ).toThrow("Unexpected end of input");
+  ).toThrow(OpenStepPropertyListError);
+  expect(
+    syntaxFailure(() =>
+      decodeOpenStepPropertyList("// comment without a line end"),
+    ),
+  ).toMatchObject({ code: "unexpected_end" });
 });
