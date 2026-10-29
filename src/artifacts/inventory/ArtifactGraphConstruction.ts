@@ -1,5 +1,9 @@
 import { hasGodotPckHeader } from "../../domain/godotPckFormat.js";
+import { hasUImageMagic } from "../../domain/uimageFormat.js";
+import { hasUnityFsHeader } from "../../domain/unityfsFormat.js";
 import { detectHexRecordEncoding } from "../../domain/firmware/hexRecords.js";
+import { recognizeEspImage } from "../../domain/firmware/espImage.js";
+import { hasFitImagesNode } from "../../domain/firmware/fitImage.js";
 import type { ArtifactClassificationEvidence } from "../ArtifactClassificationProbe.js";
 import { asarHeaderAdmissionFailure } from "../AsarHeader.js";
 import { hasDestinationPath } from "../ArtifactPaths.js";
@@ -132,7 +136,10 @@ export const createOccurrence = (
       entry.byteOffset === null ||
       entry.declaredSize === null
         ? null
-        : { offset: entry.byteOffset, length: entry.declaredSize },
+        : {
+            offset: entry.byteOffset,
+            length: entry.byteLength ?? entry.declaredSize,
+          },
     limitations: [...entry.limitations],
     ...(entry.declaredIntegrity === null
       ? {}
@@ -279,12 +286,18 @@ export const rootOccurrenceFor = (
     [
       "asar",
       "godot-pck",
+      "unityfs",
+      "uimage",
       "dmg",
       "pkg",
       "pyinstaller",
+      "dotnet-bundle",
+      "bun-standalone",
       "node-sea",
       "intel-hex",
       "srec",
+      "esp-image",
+      "fit",
     ].includes(metadata.format)
       ? "container"
       : artifactRoleForFormat(metadata.path, metadata.format).kind,
@@ -293,7 +306,8 @@ export const rootOccurrenceFor = (
   compressed_size: null,
   executable: metadata.executable,
   encrypted:
-    metadata.formatMetadata?.kind === "godot-pck" &&
+    (metadata.formatMetadata?.kind === "godot-pck" ||
+      metadata.formatMetadata?.kind === "unityfs") &&
     metadata.formatMetadata.directory_status === "encrypted",
   hash_status: "verified",
   source_location: null,
@@ -575,7 +589,15 @@ const artifactRoleForFormat = (
       format: zipPackageFormatForPath(path) ?? format,
     };
   if (format === "plist") return { kind: "plist", format };
-  if (format === "godot-pck" || format === "intel-hex" || format === "srec")
+  if (
+    format === "godot-pck" ||
+    format === "unityfs" ||
+    format === "uimage" ||
+    format === "intel-hex" ||
+    format === "srec" ||
+    format === "esp-image" ||
+    format === "fit"
+  )
     return { kind: "container", format };
   return {
     kind: ["native-addon", "dynamic-library"].includes(byPath.kind)
@@ -593,8 +615,12 @@ export const classifyArtifactBytes = (
   const { prefix, mzWindowsHeaderSignature } = evidence;
   if (hasZipSignature(prefix)) return "zip";
   if (hasGodotPckHeader(prefix)) return "godot-pck";
+  if (hasUnityFsHeader(prefix)) return "unityfs";
+  if (hasUImageMagic(prefix)) return "uimage";
   const hexRecords = detectHexRecordEncoding(prefix);
   if (hexRecords !== undefined) return hexRecords;
+  if (recognizeEspImage(prefix, fileSize) === "esp-image") return "esp-image";
+  if (hasFitImagesNode(prefix)) return "fit";
   if (hasBinaryPlistSignature(prefix)) return "plist";
   if (hasXmlPlistSignature(prefix)) return "plist";
   const fatFormat = classifyFatArtifact(evidence, fileSize);
