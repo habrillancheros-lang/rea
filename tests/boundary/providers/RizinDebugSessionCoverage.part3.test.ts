@@ -4,6 +4,11 @@ import {
   AnalysisInputError,
 } from "../../../src/domain/analysisErrorCore.js";
 import { stopOwnedDebuggerProcess } from "../../../src/process/ownedDebuggerSession.js";
+import {
+  applyDebuggerAdmissionOverride,
+  resolveDebuggerSessionLimits,
+} from "../../../src/config/debuggerSessionLimits.js";
+import { rizinCommandTimeoutLimitation } from "../../../src/rizin/RizinDebugSessionManager.js";
 import { rizinTestInferiorTty } from "./RizinTestInferiorTty.js";
 import {
   createRizinCoverageHarness,
@@ -35,7 +40,12 @@ it.skipIf(process.platform === "win32")(
       });
       expect(result.value.evidence.limitations).toEqual([
         "The current debugger target identity is not established by the Rizin session identifier.",
-        "The command timed out before its completion marker at 10 ms (deadlineExpired). This release has no runtime override. Retained output is partial and completion is unknown.",
+        rizinCommandTimeoutLimitation(
+          applyDebuggerAdmissionOverride(
+            resolveDebuggerSessionLimits({}).commandDeadline,
+            10,
+          ),
+        ),
         "The owned debugger session was stopped because output correlation could no longer be guaranteed.",
         "The command is unrestricted and may access local files, the shell, network, or mutate the target.",
         "Interrupted output may include an incomplete completion-marker prefix; it is retained because it cannot be distinguished from command diagnostics.",
