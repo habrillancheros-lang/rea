@@ -79,6 +79,7 @@ import { excludeDeclaredSensitiveArguments } from "./cli/explicitSensitiveArgume
 import { rejectSurplusCliArguments } from "./cli/strictPositionals.js";
 import { presentCliArgumentErrors } from "./cli/argumentErrors.js";
 import { completionHelpNote, createCliCompletions } from "./cli/completions.js";
+import { reportUnknownMcpSubcommand } from "./cli/mcpBuiltinCommands.js";
 import {
   closeCliGuidanceResources,
   registerGuidanceCommands,
@@ -497,7 +498,9 @@ export const createCli = (
     }
     const result = serveStrict(normalized, options ?? {}, (tokens, selected) =>
       serveDeclared(tokens, selected, (declared, declaredOptions) =>
-        serve(adaptCliOutputArgumentsForIncur(declared), declaredOptions),
+        reportUnknownMcpSubcommand(cli.name, declared, declaredOptions)
+          ? Promise.resolve()
+          : serve(adaptCliOutputArgumentsForIncur(declared), declaredOptions),
       ),
     );
     const note = completionHelpNote(normalized);
