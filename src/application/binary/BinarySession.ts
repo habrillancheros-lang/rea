@@ -161,40 +161,6 @@ const unrecordedExecution = (
 };
 
 /**
- * Documentless caller and callee reads stay in the ledger for the whole
- * session. Keep their call sites and omit instruction lists, which the scan
- * already consumed and which can be 512 KiB per function.
- */
-const compactRelationshipEvidence = (
-  operation: AnalysisOperation,
-  parameters: Readonly<Record<string, JsonValue>>,
-  rawResult: JsonValue | null,
-): JsonValue | null => {
-  if (
-    (operation !== "procedure_callers" && operation !== "procedure_callees") ||
-    typeof parameters.document === "string"
-  )
-    return rawResult;
-  if (
-    rawResult === null ||
-    typeof rawResult !== "object" ||
-    Array.isArray(rawResult)
-  )
-    return rawResult;
-  const native = rawResult.native_result;
-  if (
-    native === undefined ||
-    native === null ||
-    typeof native !== "object" ||
-    Array.isArray(native) ||
-    !Object.hasOwn(native, "instructions")
-  )
-    return rawResult;
-  const { instructions: _instructions, ...rest } = native;
-  return { ...rawResult, native_result: rest };
-};
-
-/**
  * Owns the single active target shared by CLI and MCP adapters.
  *
  * Target transitions are serialized because switching targets tears down the
@@ -1374,11 +1340,6 @@ export class BinarySession
         arguments_,
         {
           ...execution.value,
-          rawResult: compactRelationshipEvidence(
-            name,
-            arguments_,
-            execution.value.rawResult,
-          ),
           analysisProfile: profile,
           subject:
             execution.value.subject === undefined

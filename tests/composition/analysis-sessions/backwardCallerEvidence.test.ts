@@ -29,15 +29,14 @@ const effects = {
 
 it("links backward caller observations into workflow Evidence without a document", async () => {
   const forward = {
-    native_result: {
-      callers: ["0x2000"],
-      instructions: ["0x1000", "0x1004"],
-    },
+    native_result: { callers: ["0x2000"], callers_complete: true },
     forward_observations: {
       call_references: [
         {
-          source_address: "0x2000",
+          caller_address: "0x2000",
+          source_address: "0x2004",
           target_address: "0x1000",
+          source_procedure: "0x2000",
           call: "direct",
         },
       ],
@@ -117,9 +116,17 @@ it("links backward caller observations into workflow Evidence without a document
       );
     expect(caller).toMatchObject({
       parameters: { procedure: "0x1000" },
-      raw_result: {
-        native_result: { callers: ["0x2000"] },
-        forward_observations: forward.forward_observations,
+      raw_result: forward,
+    });
+    expect(caller?.raw_result).toMatchObject({
+      forward_observations: {
+        call_references: [
+          {
+            caller_address: "0x2000",
+            source_address: "0x2004",
+            target_address: "0x1000",
+          },
+        ],
       },
     });
     expect(caller?.raw_result).not.toHaveProperty("native_result.instructions");
