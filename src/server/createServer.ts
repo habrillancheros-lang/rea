@@ -1,4 +1,5 @@
 import { AnalysisSettings } from "../application/AnalysisSettings.js";
+import { parseMcpInputBudget } from "../config/mcpInputBudget.js";
 import { registerAnalysisSettingsTools } from "./registerAnalysisSettingsTools.js";
 import type { DevicetreeService } from "../application/binaryDiagnostics/DevicetreeService.js";
 import { registerDevicetreeTool } from "./registerDevicetreeTool.js";
@@ -6,8 +7,7 @@ import { pcapCaptureHostSupported } from "../domain/pcap/pcapAnalysis.js";
 import { createGpuCodeObjectsService } from "../composition/gpu.js";
 import { registerGpuCodeObjectsTools } from "./registerGpuCodeObjectsTools.js";
 import type { PacketCaptureService } from "../application/captures/PacketCaptureService.js";
-import { UNTRUSTED_CONTENT_INSTRUCTIONS } from "./toolResultEncoding.js";
-import { RECOVERY_INSTRUCTIONS } from "./recoveryInstructions.js";
+import { serverInstructions } from "./serverInstructions.js";
 import {
   createPacketCaptureService,
   tsharkHostSupported,
@@ -96,17 +96,21 @@ import { registerBinaryDiagnosticsTools } from "./registerBinaryDiagnosticsTools
 import { FridaInstrumentationManager } from "../frida/FridaInstrumentationManager.js";
 import { registerFridaTools } from "./registerFridaTools.js";
 import type { BinaryLayoutService } from "../application/binaryDiagnostics/BinaryLayoutService.js";
-import { createCatalogIdentity } from "../catalogIdentity.js";
 import { EvidenceMcpServer } from "./EvidenceMcpServer.js";
+import { catalogIdentityForToolFamilies } from "../catalogIdentity.js";
+import { parseMcpToolFamilies } from "../config/mcpToolFamilies.js";
 import { createToolResultDelivery } from "./toolResult.js";
 import type { ToolResultDelivery } from "./ToolResultDelivery.js";
 import { parseMcpResponseBudget } from "../config/mcpResponseBudget.js";
-import { parseMcpOutputSchemaProfile } from "../config/mcpOutputSchemaProfile.js";
+import {
+  parseMcpOutputSchemaProfile,
+  type McpOutputSchemaProfile,
+} from "../config/mcpOutputSchemaProfile.js";
 import {
   compactPresentationForMcpInputSchemaProfile,
   parseMcpInputSchemaProfile,
 } from "../config/mcpInputSchemaProfile.js";
-import type { CompactInputSchemaPresentation } from "./EvidenceMcpServer.js";
+import type { CompactInputSchemaPresentation } from "../contracts/compactInputSchema.js";
 import { isAbsolute } from "node:path";
 
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
@@ -202,15 +206,10 @@ import { CutterBridgeClient } from "../cutter/CutterBridgeClient.js";
 import { CutterBridgeService } from "../cutter/CutterBridgeService.js";
 import { registerCutterTools } from "./registerCutterTools.js";
 import { GdbSessionManager } from "../gdb/GdbSessionManager.js";
+import { persistentDebuggerHostSupported } from "../process/PersistentDebuggerHost.js";
 import { registerGdbTools } from "./registerGdbTools.js";
 import { RizinDebugSessionManager } from "../rizin/RizinDebugSessionManager.js";
 import { registerRizinDebugTools } from "./registerRizinDebugTools.js";
-
-const TARGET_FREE_INSTRUCTIONS =
-  "REA provides reverse-engineering tools for local artifacts, native binaries, managed code, browser pages, and runtimes. Use the tool that directly answers the question; discover targets or inspect inventory only when needed. Tool results include inline Evidence and report their coverage and limitations. An opened target persists across turns. When finished, export needed Evidence and call close_binary; its snapshot_path can retain analysis.";
-
-const ACTIVE_TARGET_INSTRUCTIONS =
-  "REA analyzes the active reverse-engineering target. Use the analysis tool that answers the question directly. Search or list symbols when discovery is needed; analyze_function provides a function dossier, and focused procedure tools return individual facets.";
 
 export interface CreateServerOptions {
   readonly analysisSettings?: AnalysisSettings;
@@ -302,6 +301,7 @@ const installSessionToolAvailability = (
   const basePolicy = sessionAvailabilityPolicy(options.availabilityPolicy, {
     optionalProviderLoadFailures: options.optionalProviderLoadFailures,
     hostUnsupported: {
+      persistentDebugger: !persistentDebuggerHostSupported(platform),
       pcapCapture: outsideVerifiedHost(
         options.pcapAnalysis,
         verifiedHost.pcapCapture,
@@ -408,32 +408,39 @@ const createMcpServer = (
   session: BinarySessionPort | undefined,
   delivery: ToolResultDelivery,
   compactPresentation: CompactInputSchemaPresentation | undefined,
-  omitOutputSchemas: boolean,
-): EvidenceMcpServer =>
-  new EvidenceMcpServer(
+  outputSchemaProfile: McpOutputSchemaProfile,
+  advertisedToolFamilies: ReadonlySet<string> | undefined,
+  inputElementBudget: string | undefined,
+): EvidenceMcpServer => {
+  const configured = parseMcpInputBudget(inputElementBudget);
+  if (!configured.ok) throw configured.error;
+  return new EvidenceMcpServer(
     {
       name: PRODUCT_IDENTITY.mcpServerKey,
       version: PRODUCT_IDENTITY.packageVersion,
     },
     {
       capabilities: {},
-      instructions: `${
-        session === undefined
-          ? ACTIVE_TARGET_INSTRUCTIONS
-          : TARGET_FREE_INSTRUCTIONS
-      } ${RECOVERY_INSTRUCTIONS} ${UNTRUSTED_CONTENT_INSTRUCTIONS}`,
+      maxToolInputElements: configured.value,
+      instructions: serverInstructions(
+        session !== undefined,
+        advertisedToolFamilies,
+      ),
     },
     session === undefined
       ? undefined
       : (evidence) => session.recordEvidence(evidence),
     delivery,
     compactPresentation,
-    omitOutputSchemas,
-    createCatalogIdentity(
+    outputSchemaProfile,
+    catalogIdentityForToolFamilies(
       compactPresentation,
-      omitOutputSchemas ? "off" : "full",
+      outputSchemaProfile,
+      advertisedToolFamilies,
     ),
+    advertisedToolFamilies,
   );
+};
 
 /**
  * Construct one MCP server without acquiring subprocess resources.
@@ -449,7 +456,10 @@ export const createServer = (
   const environment = snapshotEnvironment(options.environment ?? process.env);
   const analysisSettings =
     options.analysisSettings ?? new AnalysisSettings(environment);
-  const omitOutputSchemas = outputSchemasOmitted(environment);
+  const compactInputPresentation =
+    selectCompactInputSchemaPresentation(environment);
+  const selectedOutputSchemaProfile = outputSchemaProfile(environment);
+  const advertisedToolFamilies = selectAdvertisedToolFamilies(environment);
   const providerEnvironment = captureProviderEnvironment(
     options.providerEnvironment,
     environment,
@@ -516,8 +526,10 @@ export const createServer = (
     createMcpServer(
       session,
       delivery,
-      selectCompactInputSchemaPresentation(environment),
-      omitOutputSchemas,
+      compactInputPresentation,
+      selectedOutputSchemaProfile,
+      advertisedToolFamilies,
+      environment.REA_MCP_MAX_INPUT_ELEMENTS,
     );
   server.analysisSettings = analysisSettings;
   registerAnalysisSettingsTools(server, analysisSettings);
@@ -527,9 +539,10 @@ export const createServer = (
         ? undefined
         : (evidence) => session.recordEvidence(evidence),
       delivery,
-      createCatalogIdentity(
-        selectCompactInputSchemaPresentation(environment),
-        omitOutputSchemas ? "off" : "full",
+      catalogIdentityForToolFamilies(
+        compactInputPresentation,
+        selectedOutputSchemaProfile,
+        advertisedToolFamilies,
       ),
     );
   }
@@ -788,8 +801,12 @@ export const createServer = (
   const closeServer = server.close.bind(server);
   server.close = async () => {
     const results = await Promise.allSettled([closeServer(), closeProviders()]);
-    for (const result of results)
-      if (result.status === "rejected") throw result.reason;
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason as unknown] : [],
+    );
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, "REA server cleanup failed");
   };
   registerCaptureTools(
     server,
@@ -882,14 +899,14 @@ const selectToolResultDelivery = (
   return createToolResultDelivery(configured.value);
 };
 
-const outputSchemasOmitted = (
+const outputSchemaProfile = (
   environment: Readonly<NodeJS.ProcessEnv>,
-): boolean => {
+): McpOutputSchemaProfile => {
   const configured = parseMcpOutputSchemaProfile(
     environment.REA_MCP_OUTPUT_SCHEMA_PROFILE,
   );
   if (!configured.ok) throw configured.error;
-  return configured.value === "off";
+  return configured.value ?? "full";
 };
 
 const selectCompactInputSchemaPresentation = (
@@ -1290,6 +1307,7 @@ const registerObservationTools = ({
   });
   registerBrowserScenarioTool(server, {
     ...common,
+    evidenceById,
     provider: options.browserScenarioCapture,
     loadFailure: options.optionalProviderLoadFailures?.browserScenarioCapture,
   });
@@ -1320,4 +1338,12 @@ const registerObservationTools = ({
     recordEvidenceWithUnknown,
     withAdmittedAnalysis,
   });
+};
+
+const selectAdvertisedToolFamilies = (
+  environment: Readonly<NodeJS.ProcessEnv>,
+): ReadonlySet<string> | undefined => {
+  const configured = parseMcpToolFamilies(environment.REA_MCP_TOOL_FAMILIES);
+  if (!configured.ok) throw configured.error;
+  return configured.value === undefined ? undefined : new Set(configured.value);
 };

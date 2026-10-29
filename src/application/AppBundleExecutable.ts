@@ -1,17 +1,13 @@
 import { lstat, opendir, readFile, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
-import { parseBinary } from "plist";
 import { z } from "zod";
 
 import { preflightPropertyListDecode } from "../artifacts/apple/PropertyListDecodeBudget.js";
-import { decodeBinaryPlistUids } from "../artifacts/apple/PlistScalars.js";
+import { decodeBinaryPlistValue } from "../artifacts/apple/BinaryPlistMaterializer.js";
 import { BinaryTargetError } from "../domain/configurationErrors.js";
 import { isPathWithinRoot } from "../domain/localPath.js";
-import {
-  omitPrototypeKeys,
-  parseXmlPropertyList,
-} from "../domain/propertyListKeys.js";
+import { parseXmlPropertyList } from "../domain/propertyListKeys.js";
 import { decodeXmlPlistText } from "../domain/propertyListXmlText.js";
 import { hasBinaryPlistSignature } from "../domain/apple/appleArchiveFormat.js";
 import { err, ok, type Result } from "../domain/result.js";
@@ -123,6 +119,9 @@ export const findAppBundleResourceRoot = async (
     options.cwd === undefined ? {} : { cwd: options.cwd },
   );
   try {
+    // Admit the selected spelling before Darwin realpath can collapse file/..
+    // into a different, otherwise valid bundle resource root.
+    await stat(callerPath);
     const canonicalInput = await realpath(callerPath);
     const directLayout = await presentLayout(canonicalInput);
     const wrapped =
@@ -355,18 +354,14 @@ const executableEntrySchema = z.looseObject({ CFBundleExecutable: z.string() });
 /** Decode a binary plist in-process, so no host plist tool is required. */
 const parseBinaryPlistExecutable = (plist: Buffer): string => {
   const plan = preflightPropertyListDecode(plist, BINARY_PLIST_DECODE_BYTES);
-  // `plist` assigns a `__proto__` key as the prototype; copying drops it, as
-  // the XML path does.
-  return executableName(
-    omitPrototypeKeys(
-      parseBinary(decodeBinaryPlistUids(plist, plan.uidOffsetsToNormalize)),
-    ).value,
-  );
+  return executableName(decodeBinaryPlistValue(plist, plan));
 };
 
+/** Names are one local path component; backslash is literal on POSIX hosts. */
 const isSafeExecutableName = (name: string): boolean =>
   name.length > 0 &&
   name !== "." &&
   name !== ".." &&
   !name.includes("\0") &&
-  !/[/\\]/u.test(name);
+  !name.includes("/") &&
+  (sep !== "\\" || !name.includes("\\"));

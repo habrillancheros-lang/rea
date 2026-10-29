@@ -1,9 +1,10 @@
+import { EXISTING_PROJECT_WINDOWS_UNAVAILABLE } from "./GhidraProviderCapabilities.js";
 import { ProcessOutputTokenScanner } from "../process/ProcessOutputTokenScanner.js";
 import { GhidraNativeAotSnapshotOwner } from "./GhidraNativeAotSnapshotOwner.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { resolvedAnalysisError } from "../domain/analysisErrorBase.js";
 import { createDeferred } from "../../tests/fixtures/binarySession.js";
-import { ProviderInspectionScope } from "../providers/ProviderInspectionScope.js";
+import { ProviderInspectionScope } from "../application/ProviderInspectionScope.js";
 import { ok as javaProbeOk, err, ok } from "../domain/result.js";
 import type { GhidraJavaObservation } from "./GhidraJavaProbe.js";
 import type { GhidraSeedReport } from "./GhidraAnalysisSeeds.js";
@@ -42,7 +43,10 @@ import type { GhidraTargetSnapshot } from "./GhidraClient.js";
 import type { GhidraProviderClientFactory } from "./GhidraProviderClient.js";
 import type { GhidraHeadlessLauncher } from "./GhidraLauncher.js";
 import type { GhidraInstallationHost } from "./GhidraInstallation.js";
-import { GHIDRA_SESSION_CAPABILITIES } from "./GhidraSessionValues.js";
+import {
+  GHIDRA_MUTATING_OPERATIONS,
+  GHIDRA_SESSION_CAPABILITIES,
+} from "./GhidraSessionValues.js";
 import type { Result } from "../domain/result.js";
 import { GhidraSessionError } from "./GhidraSessionError.js";
 import { silentLogger } from "../logger.js";
@@ -665,7 +669,7 @@ describe("Ghidra platform support", () => {
         executable_role: target.executableRole,
         managed: target.managed,
         native_aot_metadata: {
-          contract_revision: "rtr-9.1-x64-pe-read-only-v7",
+          contract_revision: "rtr-9.1-x64-pe-read-only-v8",
           source_bytes: 128 * 1024 * 1024,
           work_units: 64 * 1024 * 1024,
           working_memory_bytes: 64 * 1024 * 1024,
@@ -1807,7 +1811,7 @@ describe("Ghidra measured DOS load-image projection", () => {
           ok: true,
           value: {
             result: { status: state, observations: fixture.observation },
-            rawResult: fixture.observation,
+            rawResult: null,
             analysisProfile: profile.value.profile,
           },
         });
@@ -1890,7 +1894,7 @@ it("returns read-only NativeAOT metadata inline and drills down by derived Metho
           ],
         },
       },
-      rawResult: observations,
+      rawResult: null,
     },
   });
   for (const address of [
@@ -2145,9 +2149,7 @@ it("shares one session snapshot across callers while isolating cancellation and 
   expect(secondResult).toMatchObject({
     ok: true,
     value: {
-      rawResult: {
-        source_files: [{ name: "caller-2" }],
-      },
+      rawResult: null,
       result: {
         observations: {
           source_files: [{ name: "caller-2" }],
@@ -4583,3 +4585,165 @@ it("session-observation failure clears only its resolved cleanup dependency afte
   });
   await ghidra.closeOwnedResources();
 });
+
+it("reports every Windows existing-project capability unavailable before open", async () => {
+  const ghidra = provider(installationHost("win32"), undefined, {
+    REA_GHIDRA_PROJECT_PATH: join(process.cwd(), "selected.gpr"),
+  });
+  try {
+    expect(
+      ghidra
+        .capabilities()
+        .every(
+          (capability) =>
+            !capability.available &&
+            capability.availabilityCode === "unsupported_host",
+        ),
+    ).toBe(true);
+    const readiness = await ghidra.inspectReadinessSnapshot();
+    expect(readiness.availability).toMatchObject({
+      status: "unavailable",
+      code: "unsupported_host",
+      reason: EXISTING_PROJECT_WINDOWS_UNAVAILABLE,
+    });
+    expect(
+      readiness.capabilities.every(
+        (capability) =>
+          !capability.available &&
+          capability.availabilityCode === "unsupported_host",
+      ),
+    ).toBe(true);
+  } finally {
+    await ghidra.closeOwnedResources();
+  }
+});
+
+it("reports an unsupported existing-project target as an invalid REA_GHIDRA_PROJECT_PATH setting", async () => {
+  const ghidra = provider(installationHost(), undefined, {
+    REA_GHIDRA_PROJECT_PATH: join(process.cwd(), "selected.gpr"),
+  });
+  try {
+    const resolved = await ghidra.resolveAnalysisProfile({
+      ...executableTarget("elf", "x86_64"),
+      format: "dos-com",
+    } as unknown as BinaryTarget);
+    expect(resolved.ok).toBe(false);
+    if (resolved.ok) return;
+    expect(resolved.error).toMatchObject({
+      _tag: "ConfigurationError",
+      settings: [{ setting: "REA_GHIDRA_PROJECT_PATH" }],
+    });
+  } finally {
+    await ghidra.closeOwnedResources();
+  }
+});
+
+it("keeps saved project reports as shared historical Evidence without applying fresh overrides", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rea-history-project-"));
+  await mkdir(join(root, "history.rep"));
+  await writeFile(join(root, "history.gpr"), "marker");
+  const prior = {
+    analysis_seeds: {
+      format: "rea-ghidra-seeds-v1" as const,
+      sha256: "b".repeat(64),
+      entries: 0,
+      function_created: 0,
+      function_existing: 0,
+      function_failed: 0,
+      code_decoded: 0,
+      code_failed: 0,
+      label_applied: 0,
+      label_failed: 0,
+      unmapped: 0,
+    },
+    disabled_analyzers: {
+      format: "rea-ghidra-disabled-analyzers-v1" as const,
+      analyzers: [
+        { name: "Decompiler Parameter ID", status: "disabled" as const },
+      ],
+    },
+  };
+  const close = vi.fn(async () => ok(null));
+  const ghidra = provider(
+    installationHost(),
+    () => ({
+      start: async () =>
+        ok({
+          ...sessionInfo(),
+          read_only: true,
+          existing_project: true as const,
+          analysis_complete: null,
+          ...prior,
+          capabilities: GHIDRA_SESSION_CAPABILITIES.filter(
+            (name) => !GHIDRA_MUTATING_OPERATIONS.has(name),
+          ),
+        }),
+      callTool: async () => ok([]),
+      close,
+    }),
+    { REA_GHIDRA_PROJECT_PATH: join(root, "history.gpr") },
+  );
+  onTestFinished(async () => {
+    await ghidra.closeOwnedResources();
+    await rm(root, { recursive: true, force: true });
+  });
+  const target = executableTarget("elf", "x86_64");
+  const resolved = await ghidra.resolveAnalysisProfile(target);
+  if (!resolved.ok || resolved.value.profile === null)
+    throw new Error("expected existing profile");
+  const client = ghidra.createClient(target, resolved.value.profile);
+  onTestFinished(async () => {
+    await client.close();
+  });
+  const first = await client.execute("list_procedures", {});
+  if (!first.ok) throw first.error;
+  expect(close).not.toHaveBeenCalled();
+  expect(first.value.sourceEvidence).toHaveLength(1);
+  expect(first.value.sourceEvidence?.[0]).toMatchObject({
+    operation: "health",
+    normalized_result: { origin: "caller-project", ...prior },
+  });
+  const repeated = await client.execute("list_procedures", {});
+  if (!repeated.ok) throw repeated.error;
+  expect(repeated.value.sourceEvidence?.[0]).toBe(
+    first.value.sourceEvidence?.[0],
+  );
+});
+
+it.each(["search_procedures", "search_strings"] as const)(
+  "%s applies shared folding after validation and preserves native source rows",
+  async (operation) => {
+    const rows = [
+      { address: "0x1000", value: "ſource" },
+      { address: "0x1001", value: "SOURCE" },
+      { address: "0x1002", value: "İource" },
+      { address: "0x1003", value: "unrelated" },
+    ];
+    const ghidra = provider(installationHost(), () => ({
+      start: () => Promise.resolve(ok(sessionInfo())),
+      callTool: () => Promise.resolve(ok(jsonValueSchema.parse(rows))),
+      close: () => Promise.resolve(ok(null)),
+    }));
+    const client = await createElfClient(ghidra);
+    try {
+      const result = await client.execute(operation, { pattern: "source" });
+      if (!result.ok) throw result.error;
+      expect(result.value.result).toEqual(rows.slice(0, 2));
+      expect(result.value.rawResult).toEqual(rows);
+      const regex = await client.execute(operation, {
+        pattern: "source",
+        mode: "regex",
+      });
+      if (!regex.ok) throw regex.error;
+      expect(regex.value.result).toEqual(rows);
+      const sensitive = await client.execute(operation, {
+        pattern: "source",
+        case_sensitive: true,
+      });
+      if (!sensitive.ok) throw sensitive.error;
+      expect(sensitive.value.result).toEqual(rows);
+    } finally {
+      await client.close();
+    }
+  },
+);

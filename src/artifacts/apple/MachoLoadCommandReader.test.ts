@@ -27,9 +27,9 @@ import {
   MAX_LAZY_INFO_DEPENDENCIES,
   MAX_LAZY_INFO_SYMBOL_REFERENCES,
   MAX_LOAD_COMMAND_BYTES,
-  hasMachoMagic,
   readMachoImage,
 } from "./MachoLoadCommandReader.js";
+import { hasMachoMagic } from "../../domain/apple/machoContainer.js";
 import { traceDylibResolution } from "./DylibResolutionReader.js";
 import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
 import { createTestTempDirectory } from "../../../tests/fixtures/temporaryDirectory.js";
@@ -739,6 +739,33 @@ it("selects matching arm64e subtype slices when tracing a mixed FAT image", asyn
     ["resolved", "resolved"],
   ]);
 });
+
+it.each([false, true])(
+  "rejects overlapping FAT declarations before parsing payloads (hidden row: %s)",
+  async (hidden) => {
+    const bytes = Buffer.from(
+      fatImage([
+        { cpu: CPU.arm64, bytes: machoImage({ cpu: CPU.arm64 }) },
+        { cpu: CPU.arm64, bytes: machoImage({ cpu: CPU.arm64 }) },
+      ]),
+    );
+    bytes.writeUInt32BE(bytes.readUInt32BE(16), 36);
+    bytes.writeUInt32BE(bytes.readUInt32BE(20), 40);
+    if (hidden) bytes.writeUInt32BE(1, 4);
+    const readAt = vi.fn(readerOf(bytes));
+    expect(await readMachoImage(readAt, bytes.length)).toEqual({
+      status: "malformed",
+      reason: "Mach-O slices 0 and 1 overlap.",
+    });
+    // Header identity probes are allowed; load-command payloads are not.
+    const firstOffset = bytes.readUInt32BE(16);
+    expect(
+      readAt.mock.calls.some(
+        ([offset, length]) => offset === firstOffset && length > 4,
+      ),
+    ).toBe(false);
+  },
+);
 
 it("keeps Apple's hidden ARM64 FAT row outside the raw declared slice list", async () => {
   const armv7 = { type: 12, subtype: 9 };
@@ -1855,6 +1882,72 @@ describe("Mach-O load command reader failures", () => {
   });
 });
 
+describe("Mach-O load command reader defect precedence", () => {
+  it("keeps defect precedence when one image has several defects", async () => {
+    const shortRpath = new Uint8Array(8);
+    const shortView = new DataView(shortRpath.buffer);
+    shortView.setUint32(0, LC.RPATH, true);
+    shortView.setUint32(4, 8, true);
+    const unsized = new Uint8Array(16);
+    new DataView(unsized.buffer).setUint32(0, LC.RPATH, true);
+    const decodeFirst = {
+      status: "malformed",
+      reason: "load command 0 is too short to hold a string offset",
+    };
+    // An earlier command's decode defect wins over a later framing defect,
+    expect(await read(machoImage({ commands: [shortRpath, unsized] }))).toEqual(
+      decodeFirst,
+    );
+    // over a missing later command,
+    const missing = machoImage({ commands: [shortRpath] });
+    new DataView(missing.buffer).setUint32(16, 2, true);
+    expect(await read(missing)).toEqual(decodeFirst);
+    // and over unconsumed command bytes.
+    const unconsumed = machoImage({
+      commands: [shortRpath, rpathCommand("x")],
+    });
+    new DataView(unconsumed.buffer).setUint32(16, 1, true);
+    expect(await read(unconsumed)).toEqual(decodeFirst);
+
+    // The command-size limit is checked before the slice bounds.
+    const oversized = machoImage({});
+    new DataView(oversized.buffer).setUint32(
+      20,
+      MAX_LOAD_COMMAND_BYTES + 8,
+      true,
+    );
+    expect(await read(oversized)).toMatchObject({ status: "unsupported" });
+
+    // A malformed FAT slice wins over an earlier or later unsupported one.
+    const bigEndian = new Uint8Array(32);
+    new DataView(bigEndian.buffer).setUint32(0, 0xfeedfacf, false);
+    const overlong = machoImage({});
+    new DataView(overlong.buffer).setUint32(20, overlong.byteLength, true);
+    for (const slices of [
+      [bigEndian, overlong],
+      [overlong, bigEndian],
+    ]) {
+      const fat = fatImage(slices.map((bytes) => ({ cpu: CPU.arm64, bytes })));
+      expect(await read(fat)).toEqual({
+        status: "malformed",
+        reason: "load commands extend beyond the Mach-O slice",
+      });
+    }
+
+    // The first FAT range issue is reported, whatever its category.
+    const ranged = fatImage([
+      { cpu: CPU.arm64, bytes: machoImage({}) },
+      { cpu: CPU.x86_64, bytes: machoImage({ cpu: CPU.x86_64 }) },
+    ]);
+    new DataView(ranged.buffer).setUint32(8 + 16, 53, false);
+    new DataView(ranged.buffer).setUint32(8 + 20 + 12, ranged.length, false);
+    expect(await read(ranged)).toEqual({
+      status: "unsupported",
+      reason: "FAT architecture 0 alignment exponent 53 is unsupported",
+    });
+  });
+});
+
 it.each([true, false])(
   "rejects unconsumed command bytes in wide=%s headers",
   async (wide) => {
@@ -1866,3 +1959,21 @@ it.each([true, false])(
     });
   },
 );
+
+it("observes only the common 28-byte header of a 64-bit slice", async () => {
+  const bytes = machoImage({ fileType: FILE_TYPE.dylib }).subarray(0, 28);
+  const readAt = vi.fn(readerOf(bytes));
+  expect(await readMachoImage(readAt, 32)).toMatchObject({
+    status: "parsed",
+    slices: [{ file_type: "dylib", file_type_code: FILE_TYPE.dylib }],
+  });
+  expect(readAt.mock.calls).toEqual([
+    [0, 8],
+    [0, 28],
+    [32, 0],
+  ]);
+  expect(await readMachoImage(readerOf(bytes), 28)).toEqual({
+    status: "malformed",
+    reason: "load commands extend beyond the Mach-O slice",
+  });
+});

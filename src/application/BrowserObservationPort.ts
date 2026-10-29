@@ -30,7 +30,8 @@ import type {
   WebScreenshot,
   WebScreenshotDiff,
 } from "../domain/webScreenshot.js";
-import type { ProviderIdentity, ExecutionOptions } from "./AnalysisProvider.js";
+import type { ProviderIdentity } from "./AnalysisProvider.js";
+import type { ExecutionOptions } from "./AnalysisProvider.js";
 
 /** Provider-neutral application boundary for passive browser observation. */
 export interface BrowserObservationPort {

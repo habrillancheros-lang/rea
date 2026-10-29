@@ -12,7 +12,8 @@ import {
   isValidatedImmutableJavaScriptSemanticGraph,
   type JavaScriptSemanticGraph,
 } from "./javascriptSemanticGraph.js";
-import { digestSchema, prefixedDigestSchema } from "../digests.js";
+import { digestSchema } from "../digests.js";
+import { prefixedDigestSchema } from "../digests.js";
 import { integrityContradictionSchema } from "../artifactGraph.js";
 import { artifactIntegrityPolicySchema } from "../artifactIntegrityPolicy.js";
 import { localPathStringSchema } from "../localPath.js";

@@ -5,6 +5,7 @@ import {
   open,
   realpath,
   rename,
+  stat,
   type FileHandle,
 } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
@@ -353,20 +354,27 @@ const writeTextPartsOwned = async (
       return err(
         new EvidenceFileError("write", "not-file", { path: requestedPath }),
       );
-    const canonicalParent = await realpath(dirname(requestedPath));
+    const selectedParent = dirname(requestedPath);
+    // Native lookup must accept the parent before realpath can collapse it.
+    // On macOS realpath(file/..) succeeds even though that traversal is ENOTDIR.
+    if (!(await stat(selectedParent)).isDirectory())
+      return err(
+        new EvidenceFileError("write", "missing", { path: requestedPath }),
+      );
+    const canonicalParent = await realpath(selectedParent);
     const destination = resolve(canonicalParent, basename(requestedPath));
     const existing = await lstat(destination).catch((cause: unknown) => {
       if (fileErrorCode(cause) === "ENOENT") return undefined;
       throw cause;
     });
     if (existing !== undefined) {
-      if (!overwrite)
-        return err(
-          new EvidenceFileError("write", "exists", { path: requestedPath }),
-        );
       if (!existing.isFile() || existing.isSymbolicLink())
         return err(
           new EvidenceFileError("write", "not-file", { path: requestedPath }),
+        );
+      if (!overwrite)
+        return err(
+          new EvidenceFileError("write", "exists", { path: requestedPath }),
         );
     }
     assertWriteActive(cancellation);
@@ -452,9 +460,10 @@ const stagedCleanupFailure = <
 /** A missing path or parent is a selection error, not a permission failure. */
 const fileAccessFailureReason = (
   cause: unknown,
-): "missing" | "io" | "path-limit" => {
+): "missing" | "io" | "path-limit" | "symlink-traversal" => {
   const code = fileErrorCode(cause);
   if (code === "ENAMETOOLONG") return "path-limit";
+  if (code === "ELOOP") return "symlink-traversal";
   return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "io";
 };
 

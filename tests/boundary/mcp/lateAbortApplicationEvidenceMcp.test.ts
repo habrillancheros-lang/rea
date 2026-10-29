@@ -31,6 +31,7 @@ it("retains late-cancelled Go artifact Evidence through MCP and keeps the server
     throw new Error("unexpected binary admission");
   });
   const service = new GoBinaryService({
+    close: async () => {},
     identity: { id: "fixture", name: "fixture", version: "1" },
     inspect: async (_input, options) => {
       started.resolve();

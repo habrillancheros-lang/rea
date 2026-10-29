@@ -40,15 +40,18 @@ export const defaultHopperLauncherPath = (
 };
 
 /**
- * Environment native analysis admits. JEB validates its own timeout during
+ * Environment native analysis admits. JEB validates its own settings during
  * optional provider composition; that setting must not block unrelated
  * CLI/MCP startup. Registration validation still checks it directly.
  */
 const nativeAnalysisEnvironment = (
   environment: Readonly<Record<string, string | undefined>>,
 ): Readonly<Record<string, string | undefined>> => {
-  const { REA_JEB_MCP_TIMEOUT_MS: _jebTimeout, ...appEnvironment } =
-    environment;
+  const {
+    REA_JEB_MCP_TIMEOUT_MS: _jebTimeout,
+    REA_JEB_MCP_URL: _jebUrl,
+    ...appEnvironment
+  } = environment;
   return appEnvironment;
 };
 
@@ -100,9 +103,15 @@ export const parseConfig = (
   if (!parsed.ok) return parsed;
   const env = parsed.value;
   return ok({
+    ...(env.REA_MCP_TOOL_FAMILIES === undefined
+      ? {}
+      : { mcpToolFamilies: env.REA_MCP_TOOL_FAMILIES }),
     ...(env.REA_MCP_MAX_RESPONSE_BYTES === undefined
       ? {}
       : { mcpMaxResponseBytes: env.REA_MCP_MAX_RESPONSE_BYTES }),
+    ...(env.REA_MCP_MAX_INPUT_ELEMENTS === undefined
+      ? {}
+      : { mcpMaxInputElements: env.REA_MCP_MAX_INPUT_ELEMENTS }),
     ...(env.REA_MCP_INPUT_SCHEMA_PROFILE === undefined
       ? {}
       : { mcpInputSchemaProfile: env.REA_MCP_INPUT_SCHEMA_PROFILE }),
@@ -113,6 +122,16 @@ export const parseConfig = (
     ...(env.REA_IDA_MCP_CONFIG === undefined
       ? {}
       : { idaMcpConfigPath: env.REA_IDA_MCP_CONFIG }),
+    ...(env.REA_GHIDRA_PROJECT_PATH === undefined
+      ? {}
+      : {
+          ghidraExistingProject: {
+            path: env.REA_GHIDRA_PROJECT_PATH,
+            ...(env.REA_GHIDRA_PROGRAM_NAME === undefined
+              ? {}
+              : { programName: env.REA_GHIDRA_PROGRAM_NAME }),
+          },
+        }),
     ghidraInstallDir: env.GHIDRA_INSTALL_DIR,
     ghidraJavaHome: env.JAVA_HOME,
     ghidraStartupTimeoutMs: env.REA_GHIDRA_STARTUP_TIMEOUT_MS,

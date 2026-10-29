@@ -38,6 +38,11 @@ import type { AdbRequest } from "../domain/adb/adbDeviceAnalysis.js";
 
 const it = test.skipIf(process.platform === "win32");
 
+const SCREEN_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+  "base64",
+);
+
 const VERSION_BLOCK =
   "printf 'Android Debug Bridge version 1.0.41\\nVersion 34.0.5-stub\\nInstalled as %s\\n' \"$0\"";
 
@@ -1453,19 +1458,20 @@ exit 1`,
 
 it("captures the screen as a digested PNG with its dimensions", async () => {
   const { binary, root } = await writeAdbStub(
-    () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+    (root) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
 if [ "$1" = "-s" ] && [ "$3" = "exec-out" ]; then
-  printf '\\211PNG\\r\\n\\032\\n\\0\\0\\0\\rIHDR\\0\\0\\0\\004\\0\\0\\0\\003'
+  cat "${join(root, "screen-fixture.png")}"
   exit 0
 fi
 exit 1`,
   );
+  await writeFile(join(root, "screen-fixture.png"), SCREEN_PNG);
   const output = join(root, "captures");
   const result = await evidenceResult(providerOver(binary), {
     operation: "capture_adb_screen",
     input: { serial: "emulator-5554", output_directory: output },
   });
-  expect(result).toMatchObject({ width: 4, height: 3 });
+  expect(result).toMatchObject({ width: 1, height: 1 });
   expect(
     await readFile(join(output, "screen.png")).then(
       (bytes) => bytes.subarray(1, 4).toString("latin1") === "PNG",
@@ -1476,13 +1482,14 @@ exit 1`,
 
 it("stops a screen capture aborted after adb returns but before publication", async () => {
   const { binary, root } = await writeAdbStub(
-    () => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
+    (root) => `if [ "$1" = "version" ]; then ${VERSION_BLOCK}; exit 0; fi
 if [ "$1" = "-s" ] && [ "$3" = "exec-out" ]; then
-  printf '\\211PNG\\r\\n\\032\\n\\0\\0\\0\\rIHDR\\0\\0\\0\\004\\0\\0\\0\\003'
+  cat "${join(root, "screen-fixture.png")}"
   exit 0
 fi
 exit 1`,
   );
+  await writeFile(join(root, "screen-fixture.png"), SCREEN_PNG);
   const output = join(root, "cancelled-capture");
   const controller = new AbortController();
   adbTestHooks.afterScreencap = () => controller.abort();
@@ -1503,6 +1510,24 @@ exit 1`,
   } finally {
     adbTestHooks.afterScreencap = undefined;
   }
+});
+
+it("preserves process names printed by Toybox without treating their whitespace as column padding", async () => {
+  // Toybox's final NAME column is left justified without padding; only the
+  // single separator after S belongs to the table (toys/posix/ps.c show_ps).
+  const name = " native tool ";
+  const { binary } = await writeAdbStub(
+    shellStub({
+      ps: `USER PID PPID VSZ RSS WCHAN ADDR S NAME\nroot 1234 567 123456 7890 0 0 S ${name}\r\n`,
+    }),
+  );
+  const result = await evidenceResult(providerOver(binary), {
+    operation: "list_adb_processes",
+    input: { serial: "emulator-5554" },
+  });
+  expect(result.processes).toEqual([
+    { user: "root", pid: 1234, ppid: 567, rss: 7890, state: "S", name },
+  ]);
 });
 
 it("lists processes, features, and services through fixed commands", async () => {

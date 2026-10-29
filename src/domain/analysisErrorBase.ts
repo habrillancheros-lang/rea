@@ -1,3 +1,4 @@
+import type { SavedAnalysisSnapshotPartialObservation } from "./savedAnalysisSnapshot.js";
 import type { AnalysisSettingLimit } from "./analysisSettings.js";
 import type { JsonValue } from "./jsonValue.js";
 
@@ -283,6 +284,7 @@ import type {
   WebSourceMapFetchPartialObservation,
 } from "./webBundleAnalysis.js";
 import type { WebExecutionObservation } from "./webExecution.js";
+import type { WebSourceMapReport } from "./webSourceLocation.js";
 import type { WebEventListenersObservation } from "./webEventListeners.js";
 
 import type { NativeLoadImagePartialObservation } from "./native/nativeLoadImage.js";
@@ -294,8 +296,14 @@ import type { WebNetworkCapture } from "./webNetworkCapture.js";
 import type { FridaDeviceList, FridaProcessList } from "./fridaDiscovery.js";
 import type { CutterBridgeDiscovery } from "./cutterDiscovery.js";
 
+import type { WebTraceObservation } from "./webTraceObservation.js";
+import type { WebArtifactAcquisition } from "./webArtifactAcquisition.js";
+
 /** Provider-neutral evidence collected before a typed analysis failure. */
 export type AnalysisPartialObservation =
+  | SavedAnalysisSnapshotPartialObservation
+  | WebArtifactAcquisition
+  | WebTraceObservation
   | CutterBridgeDiscovery
   | FridaDeviceList
   | FridaProcessList
@@ -313,6 +321,7 @@ export type AnalysisPartialObservation =
   | WebBundleAnalysis
   | WebBundleAcquisitionPartialObservation
   | WebSourceMapFetchPartialObservation
+  | WebSourceMapReport
   | WebExecutionObservation
   | WebEventListenersObservation
   | JavaScriptRuntimeObservation

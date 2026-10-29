@@ -9,7 +9,10 @@ import {
   AnalysisResourceConstraintError,
 } from "./analysisErrorCore.js";
 import { ArtifactOperationError } from "./artifactOperationError.js";
-import { BinaryTargetError } from "./configurationErrors.js";
+import {
+  BinaryTargetError,
+  ConfigurationError,
+} from "./configurationErrors.js";
 import { BrowserObservationError } from "./browserObservationError.js";
 import { EvidenceFileError, EvidenceIntegrityError } from "./evidenceErrors.js";
 import {
@@ -61,6 +64,28 @@ describe("agent recovery metadata", () => {
       projectAnalysisError(new UnknownRegistryError("revision-conflict")),
     ).toMatchObject({ code: "revision_conflict", retryable: true });
   });
+
+  it.each(["history_gap", "revision_chain"] as const)(
+    "preserves %s as an integrity failure with producer facts",
+    (kind) => {
+      const constraint = { kind, unknown_id: `unk_${"0".repeat(64)}` };
+      const projected = projectAnalysisError(
+        new UnknownRegistryError(constraint, {
+          cause: new Error("Unrelated private diagnostic"),
+        }),
+      );
+      expect(projected).toMatchObject({
+        code: "evidence_integrity_mismatch",
+        retryable: false,
+        details: { reason: "integrity", constraint },
+      });
+      expect(projected.message).toContain(constraint.unknown_id);
+      expect(JSON.stringify(projected)).not.toContain(
+        "Unrelated private diagnostic",
+      );
+      expect(analysisErrorProjectionSchema.parse(projected)).toEqual(projected);
+    },
+  );
 
   it("keeps retryability for transient conflicts and provider timeouts", () => {
     expect(
@@ -1169,4 +1194,25 @@ it("does not offer entry-policy retries for integrity refusals without a declare
   });
   expect(native.message).not.toContain("record-and-continue");
   expect(native.remediation.action).not.toContain("record-and-continue");
+});
+
+it("preserves ordinary configuration recovery and projects a producer-owned session repair", () => {
+  const settings = [{ setting: "REA_EXAMPLE", constraint: "must be positive" }];
+  const original = projectAnalysisError(
+    new ConfigurationError("Invalid setting", { settings }),
+  );
+  const repairing = projectAnalysisError(
+    new ConfigurationError("Invalid setting", {
+      settings,
+      remediationAction: "Repair the running session, then retry.",
+    }),
+  );
+  expect(original.remediation.action).toBe(
+    "Correct REA_EXAMPLE in the environment that starts REA (your shell or the MCP client's registration), then rerun.",
+  );
+  expect(repairing).toEqual({
+    ...original,
+    remediation: { action: "Repair the running session, then retry." },
+  });
+  expect(repairing.code).toBe("configuration_invalid");
 });
