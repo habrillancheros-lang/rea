@@ -517,6 +517,7 @@ interface GdbSession {
   bufferTail: Buffer | undefined;
   bufferTailBytes: number;
   bufferBytes: number;
+  discardingOversizedStreamRecord: boolean;
   invalidUtf8Observed: boolean;
   promptTail: string;
   ready: boolean;
@@ -848,6 +849,7 @@ export class GdbSessionManager {
       bufferTail: undefined,
       bufferTailBytes: 0,
       bufferBytes: 0,
+      discardingOversizedStreamRecord: false,
       invalidUtf8Observed: false,
       promptTail: "",
       ready: false,
@@ -1625,6 +1627,13 @@ export class GdbSessionManager {
       [];
     let offset = 0;
     while (offset < data.byteLength) {
+      if (session.discardingOversizedStreamRecord) {
+        const newline = data.indexOf(0x0a, offset);
+        if (newline < 0) return;
+        session.discardingOversizedStreamRecord = false;
+        offset = newline + 1;
+        continue;
+      }
       const newline = data.indexOf(0x0a, offset);
       const piece = data.subarray(
         offset,
@@ -1634,6 +1643,28 @@ export class GdbSessionManager {
       const lineBytes =
         session.bufferBytes - (newline >= 0 && piece.at(-1) === 0x0d ? 1 : 0);
       if (lineBytes > MAX_MI_LINE_BYTES) {
+        const firstByte =
+          session.bufferChunks[0]?.at(0) ??
+          session.bufferTail?.at(0) ??
+          piece.at(0);
+        // Stream records carry only console, target or log output, and MI
+        // c-strings escape newlines: a raw LF always ends the record, so the
+        // rest of an oversized stream record is output loss, not desync.
+        if (firstByte === 0x7e || firstByte === 0x40 || firstByte === 0x26) {
+          session.bufferChunks.length = 0;
+          session.bufferTail = undefined;
+          session.bufferTailBytes = 0;
+          session.bufferBytes = 0;
+          for (const pending of session.pending.values())
+            pending.outputTruncated = true;
+          session.recentRecordsTruncated = true;
+          if (newline < 0) {
+            session.discardingOversizedStreamRecord = true;
+            return;
+          }
+          offset = newline + 1;
+          continue;
+        }
         this.#failProtocol(
           session,
           `GDB emitted an MI line exceeding the ${String(MAX_MI_LINE_BYTES)} byte (16 MiB) protocol limit. This release has no runtime override.`,
