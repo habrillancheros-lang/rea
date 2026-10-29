@@ -12,6 +12,7 @@ import {
   PLAYWRIGHT_ELECTRON_ACTIVE_PROVIDER_IDENTITY,
 } from "../browser/providerIdentities.js";
 import { V8_INSPECTOR_PROVIDER_IDENTITY } from "../inspector/providerIdentity.js";
+import type { V8InspectorAdmission } from "../inspector/V8InspectorProvider.js";
 import { err, ok, type Result } from "../domain/result.js";
 
 /** Precisely typed startup factories for the five existing observation ports. */
@@ -27,6 +28,7 @@ export const createOptionalObservationFactories = (
   settings?: AnalysisSettingsReader,
 ): OptionalObservationFactories => {
   const environment = snapshotEnvironment(selectedEnvironment);
+  let runtimeAdmission: V8InspectorAdmission | undefined;
   return {
     browserObservation: async () =>
       (
@@ -44,10 +46,15 @@ export const createOptionalObservationFactories = (
       (await import("./electronScenario.js")).createElectronScenarioProvider(
         environment,
       ),
-    javascriptRuntimeObservation: async () =>
-      (
-        await import("./javascriptRuntimeObservation.js")
-      ).createJavaScriptRuntimeObservationProvider(environment, settings),
+    javascriptRuntimeObservation: async () => {
+      const runtime = await import("./javascriptRuntimeObservation.js");
+      runtimeAdmission ??= new runtime.V8InspectorAdmission();
+      return runtime.createJavaScriptRuntimeObservationProvider(
+        environment,
+        settings,
+        runtimeAdmission,
+      );
+    },
   };
 };
 
