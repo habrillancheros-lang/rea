@@ -316,6 +316,35 @@ linuxIt(
 );
 
 linuxIt(
+  "accepts a renamed util-linux prlimit and probes the configured engines",
+  async () => {
+    const { environment, root, host } = await fixture({
+      limiterBanner: "prlimit-limiter from util-linux 2.39.3\n",
+    });
+    const limiter = join(root, "prlimit-limiter");
+    await executable(limiter, "exit 9\n");
+    const doctor = new FirmwareDoctor(
+      { ...environment, REA_FIRMWARE_PRLIMIT_COMMAND: limiter },
+      "linux",
+      host,
+    );
+    const inspections = await doctor.inspect();
+    expect(inspections.map(({ id, available }) => ({ id, available }))).toEqual(
+      [
+        { id: "binwalk", available: true },
+        { id: "unblob", available: true },
+      ],
+    );
+    expect(host.runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ command: limiter, arguments: ["--version"] }),
+      expect.any(Object),
+      expect.any(Object),
+    );
+    expect(await doctor.close()).toBeUndefined();
+  },
+);
+
+linuxIt(
   "rejects a non-util-linux limiter without probing engines",
   async () => {
     const { environment, root, host } = await fixture();
@@ -429,6 +458,7 @@ const executable = async (path: string, body: string): Promise<void> => {
 const fixture = async (
   options: {
     binwalkBanner?: string;
+    limiterBanner?: string;
     dependencies?: string;
     dependencyExit?: number;
   } = {},
@@ -450,7 +480,10 @@ const fixture = async (
       expect(limits.timeoutMs).toBe(5000);
       expect(limits.diagnosticBytes).toBe(64 * 1024);
       if (spawn.arguments.length === 1 && spawn.arguments[0] === "--version")
-        return snapshot("prlimit from util-linux 2.39.3\n", 0);
+        return snapshot(
+          options.limiterBanner ?? "prlimit from util-linux 2.39.3\n",
+          0,
+        );
       expect(spawn.arguments.slice(0, 5)).toEqual([
         "--as=1073741824",
         "--fsize=0",

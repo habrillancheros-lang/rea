@@ -113,7 +113,7 @@ export class FirmwareDoctor {
         const valid =
           result.ok &&
           result.value.exitCode === 0 &&
-          /^prlimit from util-linux \d/u.test(result.value.stdout.trim());
+          /^.+ from util-linux \d/u.test(result.value.stdout.trim());
         checks.push(
           diagnostic(
             "prlimit",
