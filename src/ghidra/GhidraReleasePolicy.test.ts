@@ -27,8 +27,11 @@ describe("ghidraReleaseCompatibility", () => {
     expect(compatibility.raw).toBe("12.2");
   });
 
-  it("rejects other majors and older minors", () => {
-    expect(ghidraReleaseCompatibility("12.0.4").status).toBe("unsupported");
+  it("admits 12.0 releases on the major as compatible", () => {
+    expect(ghidraReleaseCompatibility("12.0.4").status).toBe("compatible");
+  });
+
+  it("rejects other majors", () => {
     expect(ghidraReleaseCompatibility("11.4").status).toBe("unsupported");
     expect(ghidraReleaseCompatibility("13.0").status).toBe("unsupported");
   });
@@ -67,7 +70,7 @@ describe("unverifiedGhidraBuildLimitation", () => {
 
 describe("ghidraReleaseLine", () => {
   it("names the accepted release floor", () => {
-    expect(ghidraReleaseLine()).toBe("12.x (>=12.1)");
+    expect(ghidraReleaseLine()).toBe("12.x (>=12.0)");
   });
 });
 

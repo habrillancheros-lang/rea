@@ -56,5 +56,11 @@ export const ghidraRawBinaryLanguage = (
         compilerSpecId: "default",
         defaultAddressSpace: "ram",
       };
+    case "cortex-m":
+      return {
+        languageId: "ARM:LE:32:Cortex",
+        compilerSpecId: "default",
+        defaultAddressSpace: "ram",
+      };
   }
 };

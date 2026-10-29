@@ -175,6 +175,28 @@ describe("raw-binary admission", () => {
   );
 });
 
+describe("cortex-m raw-binary admission", () => {
+  it("admits 32-bit Cortex-M images with even or Thumb-bit entry points", () => {
+    for (const [entryPoint, fileBytes] of [
+      ["0x0", 262144],
+      ["0x4000", 65536],
+      ["0x4001", 65536], // Thumb mode bit set
+    ] as const) {
+      const result = admitRawBinary({
+        architecture: "cortex-m",
+        entryPoint,
+        fileBytes,
+      });
+      if (!result.ok) throw new Error(result.error.reason);
+      expect(result.value).toEqual({
+        architecture: "cortex-m",
+        entryPoint,
+        entryPointSource: entryPoint,
+      });
+    }
+  });
+});
+
 describe("m68k raw-binary admission", () => {
   it("admits even m68k entries up to the 32-bit address boundary", () => {
     for (const [entryPoint, fileBytes] of [
