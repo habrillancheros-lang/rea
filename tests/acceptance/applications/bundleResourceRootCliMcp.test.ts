@@ -5,7 +5,9 @@ import { expect } from "vitest";
 
 import { sqliteDatabaseCapability } from "../../../src/application/sqlite/SqliteDatabaseCapability.js";
 import { toolContract } from "../../../src/contracts/toolContracts.js";
+import { analysisErrorRemediationAction } from "../../../src/domain/analysisErrorPresentation.js";
 import { parseEvidence } from "../../../src/domain/evidence.js";
+import { ResourceSnapshotMismatchError } from "../../../src/domain/evidenceErrors.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { connectLocalToolsMcp } from "../../fixtures/localToolsMcp.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
@@ -180,8 +182,13 @@ cliTest.skipIf(process.platform !== "darwin")(
     expect(refusedSnapshot.isError).toBe(true);
     expect(errorBody(refusedSnapshot)).toMatchObject({
       error: {
+        code: "evidence_integrity_mismatch",
+        category: "integrity_mismatch",
+        retryable: false,
         remediation: {
-          action: expect.stringContaining("without snapshot_path"),
+          action: analysisErrorRemediationAction(
+            new ResourceSnapshotMismatchError("export"),
+          ),
         },
       },
     });
@@ -260,7 +267,7 @@ cliTest.skipIf(process.platform !== "darwin")(
 );
 
 const errorBody = (response: {
-  content: Array<{ type: string; [key: string]: unknown }>;
+  content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
 }): unknown => {
   const text = response.content.find((item) => item.type === "text");
   if (typeof text?.text !== "string") throw new Error("Expected error text");
