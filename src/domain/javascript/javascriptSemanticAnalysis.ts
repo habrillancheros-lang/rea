@@ -44,6 +44,7 @@ import type {
   JavaScriptSemanticScopeState,
   JavaScriptBindingIndex,
   JavaScriptSemanticReferenceEffectsAtSite,
+  JavaScriptBuiltinPrototypeOwner,
 } from "./javascriptSemanticState.js";
 import {
   currentSemanticScope,
@@ -1066,6 +1067,7 @@ const createState = (
     bindingsById: new Map(),
     bindingWrites: new Map(),
     prototypeRequireMutationObserved: false,
+    prototypeRequireMutationOwners: new Set(),
     prototypeEnumerationMayAffect: false,
     callables: [],
     callableNodesById: new Map(),
@@ -1143,6 +1145,13 @@ function* collectDefinitionsSteps(
         t.isWithStatement(node) ||
         t.isForInStatement(node) ||
         t.isForOfStatement(node)
+      )
+        needsPrototypeFacts = true;
+      if (
+        (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) &&
+        (t.isLiteral(unwrapJavaScriptExpression(node.object).node) ||
+          t.isObjectExpression(unwrapJavaScriptExpression(node.object).node) ||
+          t.isArrayExpression(unwrapJavaScriptExpression(node.object).node))
       )
         needsPrototypeFacts = true;
       let parentScope = currentSemanticScope(stack);
@@ -1406,20 +1415,29 @@ function* collectDefinitionsSteps(
   if (state.opaqueEffects.byScope.size > 0) clearSemanticValueCaches(state);
 }
 
-type PrototypeOwner = "Object" | "Array" | "String";
-
-const prototypeOwners = ["Object", "Array", "String"] as const;
+const prototypeOwners = [
+  "Object",
+  "Array",
+  "String",
+  "Number",
+  "Boolean",
+  "RegExp",
+  "BigInt",
+] as const satisfies readonly JavaScriptBuiltinPrototypeOwner[];
 
 /** Preserve uncertainty when source can change or expose a built-in prototype. */
 function* indexPrototypeUncertaintySteps(
   program: t.Program,
   state: JavaScriptSemanticAnalysisState,
 ): Generator<void, void> {
-  const taint = (owner: PrototypeOwner): void => {
+  const taint = (owner: JavaScriptBuiltinPrototypeOwner): void => {
+    state.prototypeRequireMutationOwners.add(owner);
     if (owner === "Object") state.prototypeRequireMutationObserved = undefined;
     state.prototypeEnumerationMayAffect = undefined;
   };
-  const globalOwner = (node: t.Node): PrototypeOwner | undefined => {
+  const globalOwner = (
+    node: t.Node,
+  ): JavaScriptBuiltinPrototypeOwner | undefined => {
     const value = unwrapJavaScriptExpression(node).node;
     for (const owner of prototypeOwners) {
       if (isUnmodifiedGlobalReference(value, state, owner)) return owner;
@@ -1431,7 +1449,9 @@ function* indexPrototypeUncertaintySteps(
     }
     return undefined;
   };
-  const prototypeOwner = (node: t.Node): PrototypeOwner | undefined => {
+  const prototypeOwner = (
+    node: t.Node,
+  ): JavaScriptBuiltinPrototypeOwner | undefined => {
     const value = unwrapJavaScriptExpression(node).node;
     return (t.isMemberExpression(value) ||
       t.isOptionalMemberExpression(value)) &&
