@@ -462,16 +462,29 @@ const evaluateVerifierControls = (
       );
       continue;
     }
-    const controlOwnerSha256 =
-      control.candidate_sha256 ??
-      (control.candidate_id === undefined
-        ? binding.owner.owner_sha256
-        : undefined);
-    if (controlOwnerSha256 === undefined) {
+    const reusesPositiveFixture =
+      control.candidate_id !== undefined &&
+      binding.fixtures.some(
+        (fixture) =>
+          fixture.case_kind === "positive" &&
+          fixture.fixture_id === control.candidate_id,
+      );
+    // A missing digest must not fall back to the positive owner. Two proof
+    // records about that one digest, one passing and one failing, are not a
+    // known-bad control.
+    if (
+      control.candidate_sha256 === undefined ||
+      control.candidate_sha256 === binding.owner.owner_sha256 ||
+      reusesPositiveFixture
+    ) {
       addDiagnostic(
         diagnostics,
         "inapplicable-verifier-control-proof",
-        `Verifier negative control ${control.control_id} proof qualification: owner-mismatch.`,
+        control.candidate_sha256 === binding.owner.owner_sha256
+          ? `Verifier negative control ${control.control_id} reuses the positive owner digest.`
+          : reusesPositiveFixture
+            ? `Verifier negative control ${control.control_id} reuses positive fixture ${control.candidate_id}.`
+            : `Verifier negative control ${control.control_id} does not name a distinct candidate_sha256.`,
       );
       continue;
     }
@@ -484,7 +497,7 @@ const evaluateVerifierControls = (
         kind: "verifier",
         obligationId: candidate.obligation_id,
         obligationVersion: candidate.obligation_version,
-        ownerSha256: controlOwnerSha256,
+        ownerSha256: control.candidate_sha256,
         verifierId: verifier.verifier_id,
         claimId: verifier.claim_id,
         expectedPassed: false,

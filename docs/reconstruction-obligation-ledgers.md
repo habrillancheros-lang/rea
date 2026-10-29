@@ -419,8 +419,11 @@ the exact `(fixture_id, case_kind)` pair, and verifier proof the exact
 claim. Each verifier binding must also declare at least one negative control in
 `verifier.controls` with `status: "fail"` and a retained proof record whose
 matching `(verifier_id, claim_id)` entry reports `passed: false` against the
-control's `candidate_sha256` (required whenever `candidate_id` is specified, or
-defaulting to `owner.owner_sha256` when challenging the owner binding directly).
+control's `candidate_sha256`. That digest is required and must differ from the
+positive `owner.owner_sha256`. `candidate_id`, when set, must not repeat a
+positive fixture id. Omitting the digest, reusing the positive owner digest, or
+reusing a positive fixture id is `inapplicable-control-proof` and cannot close
+the obligation.
 Claims may share a record, but identities or outcomes from different bindings
 are never joined. Fixture, verifier, and negative-control Evidence authority
 must also satisfy the existing authority requirements.
@@ -433,8 +436,8 @@ When a verifier is bound, each evaluated obligation publishes
 emitting `vacuous-verifier` and failing a required ledger),
 `missing-control-result` (control Evidence is absent from the bundle, emitting
 `missing-verifier-control-result`), `inapplicable-control-proof` (control proof
-is malformed, mismatched, missing `candidate_sha256` for a named `candidate_id`,
-or lacks required authority), or `control-unavailable` (control status is
+is malformed, mismatched, omits `candidate_sha256`, reuses the positive owner
+digest or a positive fixture id, or lacks required authority), or `control-unavailable` (control status is
 `unknown`, `unsupported`, or `skipped`).
 
 Manifest bindings that previously closed an obligation with a passing `verifier` and omitted or empty `verifier.controls` now remain open (`status: "implemented"`, `verifier_control_status: "unchallenged"`, and diagnostic `missing-verifier-control`), because an unchallenged verifier cannot rule out vacuous acceptance. Existing serialized ledgers without `verifier.controls` or `verifier_control_status` continue to parse cleanly; to close an obligation during evaluation, add at least one failing negative control in `verifier.controls` backed by retained `rea.reconstruction-proof` Evidence reporting `passed: false` for the challenged candidate.

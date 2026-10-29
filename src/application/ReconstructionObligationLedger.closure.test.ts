@@ -766,7 +766,10 @@ describe("reconstruction verifier invalid control evidence (#4396)", () => {
         ],
       },
     });
-    expect(missingResult.status).toBe("open");
+    expect(missingResult.status).toBe("unknown");
+    expect(missingResult.limitations.join("\n")).toContain(
+      "absent from the input bundle",
+    );
     expect(missingResult.obligations[0]).toMatchObject({
       status: "implemented",
       verifier_control_status: "missing-control-result",
@@ -962,7 +965,7 @@ describe("reconstruction verifier negative control identity and authority (#4396
       diagnostics: [
         {
           code: "inapplicable-verifier-control-proof",
-          detail: expect.stringContaining("owner-mismatch"),
+          detail: expect.stringContaining("distinct candidate_sha256"),
         },
       ],
     });
@@ -1020,6 +1023,131 @@ describe("reconstruction verifier negative control identity and authority (#4396
         {
           code: "weak-verifier-authority",
           detail: expect.stringContaining("insufficient-authority"),
+        },
+      ],
+    });
+  });
+});
+
+describe("reconstruction verifier negative control subject identity (#4396)", () => {
+  it("refuses a negative control that reuses the positive owner digest or a positive fixture id", () => {
+    const ledgerRequest = readyProcessLedgerRequest();
+    const binding = ledgerRequest.manifest.bindings[0]!;
+    const verifier = binding.verifier!;
+    const control = verifier.controls![0]!;
+    const positiveFixtureId = binding.fixtures.find(
+      (fixture) => fixture.case_kind === "positive",
+    )?.fixture_id;
+    if (positiveFixtureId === undefined)
+      throw new Error("Expected a positive fixture");
+
+    const sameOwnerFailure = boundProofEvidence("same-owner-control", {
+      bindings: [
+        {
+          obligation_id: binding.obligation_id,
+          obligation_version: 1,
+          owner_sha256: binding.owner.owner_sha256,
+          fixtures: [],
+          verifiers: [
+            {
+              verifier_id: verifier.verifier_id,
+              claim_id: verifier.claim_id,
+              passed: false,
+            },
+          ],
+        },
+      ],
+    });
+    const reusedOwner = build(
+      request([...ledgerRequest.evidence_bundle.records, sameOwnerFailure], {
+        manifest: {
+          ...ledgerRequest.manifest,
+          bindings: [
+            {
+              ...binding,
+              verifier: {
+                ...verifier,
+                controls: [
+                  {
+                    control_id: control.control_id,
+                    defect: control.defect,
+                    status: "fail" as const,
+                    result_evidence_id: sameOwnerFailure.evidence_id,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    );
+    expect(reusedOwner.status).toBe("open");
+    expect(reusedOwner.obligations[0]).toMatchObject({
+      status: "implemented",
+      verifier_control_status: "inapplicable-control-proof",
+      diagnostics: [
+        {
+          code: "inapplicable-verifier-control-proof",
+          detail: expect.stringContaining("distinct candidate_sha256"),
+        },
+      ],
+    });
+
+    const explicitOwnerReuse = build(
+      request([...ledgerRequest.evidence_bundle.records, sameOwnerFailure], {
+        manifest: {
+          ...ledgerRequest.manifest,
+          bindings: [
+            {
+              ...binding,
+              verifier: {
+                ...verifier,
+                controls: [
+                  {
+                    ...control,
+                    candidate_sha256: binding.owner.owner_sha256,
+                    result_evidence_id: sameOwnerFailure.evidence_id,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      }),
+    );
+    expect(explicitOwnerReuse.status).toBe("open");
+    expect(explicitOwnerReuse.obligations[0]).toMatchObject({
+      verifier_control_status: "inapplicable-control-proof",
+      diagnostics: [
+        {
+          code: "inapplicable-verifier-control-proof",
+          detail: expect.stringContaining("positive owner digest"),
+        },
+      ],
+    });
+
+    const reusedFixture = build({
+      ...ledgerRequest,
+      manifest: {
+        ...ledgerRequest.manifest,
+        bindings: [
+          {
+            ...binding,
+            verifier: {
+              ...verifier,
+              controls: [{ ...control, candidate_id: positiveFixtureId }],
+            },
+          },
+        ],
+      },
+    });
+    expect(reusedFixture.status).toBe("open");
+    expect(reusedFixture.obligations[0]).toMatchObject({
+      verifier_control_status: "inapplicable-control-proof",
+      diagnostics: [
+        {
+          code: "inapplicable-verifier-control-proof",
+          detail: expect.stringContaining(positiveFixtureId),
         },
       ],
     });
