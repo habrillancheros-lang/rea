@@ -3,6 +3,7 @@ import type { EvidenceMcpServer } from "../EvidenceMcpServer.js";
 import { runAdmittedToolOperation } from "../admittedToolOperation.js";
 import { recordEvidenceSources } from "../../application/investigation/recordEvidenceSources.js";
 
+import { resolvePairedEvidenceSources } from "../../application/EvidenceInputResolver.js";
 import { executeManagedMemberComparison } from "../../application/managed/ManagedMemberComparisonService.js";
 import { logToolExecution } from "../toolLogging.js";
 import { toolRegistrationOptions } from "../toolRegistrationOptions.js";
@@ -26,10 +27,35 @@ export const registerCompareManagedMembers = (
         compareContract.name,
         context.mcpReq.signal,
         async () => {
+          const parsed = compareContract.inputSchema.safeParse(input);
+          if (!parsed.success) {
+            const rejected = executeManagedMemberComparison(input);
+            if (rejected.ok)
+              throw new Error("Invalid managed member input was accepted");
+            return server.delivery.toCallToolResult(rejected, compareContract);
+          }
+          const sources = await resolvePairedEvidenceSources(
+            parsed.data,
+            options.session.evidenceForAnalysis.bind(options.session),
+            {
+              operation: compareContract.name,
+              signal: context.mcpReq.signal,
+              resources: options.artifactResources,
+            },
+          );
+          if (!sources.ok)
+            return server.delivery.toCallToolResult(sources, compareContract);
           const result = await logToolExecution(
             options.logger,
             compareContract.name,
-            () => Promise.resolve(executeManagedMemberComparison(input)),
+            () =>
+              Promise.resolve(
+                executeManagedMemberComparison({
+                  ...parsed.data,
+                  left: sources.value.left,
+                  right: sources.value.right,
+                }),
+              ),
           );
           if (!result.ok)
             return server.delivery.toCallToolResult(result, compareContract);

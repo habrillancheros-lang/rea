@@ -1,6 +1,8 @@
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 
+import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
+import { resolvePairedEvidenceSources } from "../application/EvidenceInputResolver.js";
 import { toolContract } from "../contracts/toolContracts.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -83,6 +85,7 @@ export const registerProcessComparisonTool = (
   server: EvidenceMcpServer,
   session: BinarySessionPort,
   contract: ReturnType<typeof toolContract<"compare_process_captures">>,
+  resources: ArtifactResourceScope,
   now: () => number = Date.now,
 ): void => {
   const admission = withAdmittedAnalysis({ kind: "session", session });
@@ -96,9 +99,28 @@ export const registerProcessComparisonTool = (
         contract.name,
         context.mcpReq.signal,
         async () => {
-          const left = parseCaptureSide(contract.name, "left", input.left);
+          const sources = await resolvePairedEvidenceSources(
+            input,
+            session.evidenceForAnalysis.bind(session),
+            {
+              operation: contract.name,
+              signal: context.mcpReq.signal,
+              resources,
+            },
+          );
+          if (!sources.ok)
+            return server.delivery.toCallToolResult(sources, contract);
+          const left = parseCaptureSide(
+            contract.name,
+            "left",
+            sources.value.left,
+          );
           if (!left.ok) return server.delivery.toCallToolResult(left, contract);
-          const right = parseCaptureSide(contract.name, "right", input.right);
+          const right = parseCaptureSide(
+            contract.name,
+            "right",
+            sources.value.right,
+          );
           if (!right.ok)
             return server.delivery.toCallToolResult(right, contract);
           const { record: leftRecord } = left.value;

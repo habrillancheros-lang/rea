@@ -1,6 +1,6 @@
 import { requireOutputSchema } from "../toolOutputSchemaPrimitives.js";
 import { z } from "zod";
-import { evidenceSchema } from "../../domain/evidence.js";
+import { evidenceSourceInputSchema } from "../../domain/evidenceReference.js";
 import { compareManagedMembersInputSchema } from "../../domain/managed/managedMemberComparison.js";
 import { managedNativeVerificationInputSchema } from "../../domain/managed/managedNativeVerificationSchemas.js";
 
@@ -16,35 +16,38 @@ import {
 import { toolContractMetadata } from "../toolEffects.js";
 
 const managedApplicationGraphReferenceShape = z.strictObject({
-  managed_artifact: evidenceSchema.optional(),
-  managed_members: evidenceSchema.optional(),
-  managed_native_boundaries: evidenceSchema.optional(),
+  managed_artifact: evidenceSourceInputSchema.optional(),
+  managed_members: evidenceSourceInputSchema.optional(),
+  managed_native_boundaries: evidenceSourceInputSchema.optional(),
 });
 
-/** Inline Evidence sources for managed application graph projection. */
+/** Evidence sources for managed application graph projection. */
 export const managedApplicationGraphReferenceInputSchema = z
   .union([
     managedApplicationGraphReferenceShape.extend({
-      managed_artifact: evidenceSchema,
+      managed_artifact: evidenceSourceInputSchema,
     }),
     managedApplicationGraphReferenceShape.extend({
-      managed_members: evidenceSchema,
+      managed_members: evidenceSourceInputSchema,
     }),
     managedApplicationGraphReferenceShape.extend({
-      managed_native_boundaries: evidenceSchema,
+      managed_native_boundaries: evidenceSourceInputSchema,
     }),
   ])
   .superRefine((input, context) => {
-    const ids = [
-      input.managed_artifact?.evidence_id,
-      input.managed_members?.evidence_id,
-      input.managed_native_boundaries?.evidence_id,
-    ].filter((id): id is string => id !== undefined);
-    if (ids.length === 0)
+    const present = [
+      input.managed_artifact,
+      input.managed_members,
+      input.managed_native_boundaries,
+    ].filter((source) => source !== undefined);
+    if (present.length === 0)
       context.addIssue({
         code: "custom",
         message: "Provide at least one managed Evidence source",
       });
+    const ids = present
+      .map((source) => source.evidence_id)
+      .filter((id): id is string => id !== undefined);
     if (new Set(ids).size !== ids.length)
       context.addIssue({
         code: "custom",

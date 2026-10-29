@@ -750,13 +750,14 @@ describe("json depth bounds over MCP", () => {
         },
         details: {
           operation: "compare_process_captures",
-          issues: [
+          // Source inputs are a union, so the report also names the alternative forms.
+          issues: expect.arrayContaining([
             {
               path: ["left", "parameters"],
               reason: "invalid_value",
               message: expect.stringContaining(String(MAX_JSON_DEPTH)),
             },
-          ],
+          ]),
         },
       },
     });

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import { emptyArraySchema } from "../emptyArraySchema.js";
-import { evidenceSchema } from "../evidence.js";
+import { evidenceSourceInputSchema } from "../evidenceReference.js";
 import {
   cliMetadataGuidSchema,
   managedMetadataTokenSchema,
@@ -31,11 +31,12 @@ const boundedTextSchema = z.string().min(1);
 /** Two authenticated managed member observations. */
 export const compareManagedMembersInputSchema = z
   .strictObject({
-    left: evidenceSchema,
-    right: evidenceSchema,
+    left: evidenceSourceInputSchema,
+    right: evidenceSourceInputSchema,
   })
   .superRefine((input, context) => {
-    if (input.left.evidence_id === input.right.evidence_id)
+    const left = input.left.evidence_id;
+    if (left !== undefined && left === input.right.evidence_id)
       context.addIssue({
         code: "custom",
         path: ["right"],

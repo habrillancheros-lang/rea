@@ -33,7 +33,7 @@ const providerNames = [
 ];
 
 const captureEvidence = (
-  side: "left" | "right",
+  side: string,
   result: Evidence["normalized_result"] = EMPTY_PROCESS_CAPTURE_EXAMPLE,
 ) =>
   createEvidence(undefined, PROCESS_PROVIDER, {
@@ -168,6 +168,70 @@ it("feeds the exact public CLI/MCP process comparison into all three MCP consume
   );
   expect(cliComparison).toEqual(comparison);
   await expectConsumerResults(client, comparison);
+});
+
+it("resolves retained and file process capture Evidence through the public workflow", async () => {
+  const { session, client, left, right, comparison } =
+    await connectedComparison();
+  const retained = await client.callTool({
+    name: "compare_process_captures",
+    arguments: {
+      left: { kind: "retained-evidence", evidence_id: left.evidence_id },
+      right: { kind: "retained-evidence", evidence_id: right.evidence_id },
+    },
+  });
+  expect(retained.isError, JSON.stringify(retained)).not.toBe(true);
+  expect(inlineEvidence(retained)).toEqual(comparison);
+
+  const fileLeft = captureEvidence("file-left");
+  const fileRight = captureEvidence("file-right");
+  const root = await createTestTempDirectory("rea-process-sources-");
+  const sourcePath = join(root, "captures.json");
+  await writeFile(
+    sourcePath,
+    JSON.stringify(createEvidenceBundle([fileLeft, fileRight])),
+  );
+  const fromFiles = await client.callTool({
+    name: "compare_process_captures",
+    arguments: {
+      left: {
+        kind: "evidence-file",
+        path: sourcePath,
+        evidence_id: fileLeft.evidence_id,
+      },
+      right: {
+        kind: "evidence-file",
+        path: sourcePath,
+        evidence_id: fileRight.evidence_id,
+      },
+    },
+  });
+  expect(fromFiles.isError, JSON.stringify(fromFiles)).not.toBe(true);
+  expect(inlineEvidence(fromFiles)).toMatchObject({
+    parameters: {
+      left_evidence_id: fileLeft.evidence_id,
+      right_evidence_id: fileRight.evidence_id,
+    },
+    normalized_result: { status: "unchanged" },
+  });
+  expect(session.evidenceForAnalysis(fileLeft.evidence_id)).toEqual(fileLeft);
+  expect(session.evidenceForAnalysis(fileRight.evidence_id)).toEqual(fileRight);
+
+  const missingId = `ev_${"0".repeat(64)}`;
+  const missing = await client.callTool({
+    name: "compare_process_captures",
+    arguments: {
+      left: { kind: "retained-evidence", evidence_id: missingId },
+      right: { kind: "retained-evidence", evidence_id: right.evidence_id },
+    },
+  });
+  expect(missing.isError).toBe(true);
+  expect(parseMcpToolError(missing)).toMatchObject({
+    error: {
+      code: "evidence_integrity_mismatch",
+      details: { evidence_id: missingId, reason: "missing" },
+    },
+  });
 });
 
 it("advertises the same process comparison Evidence that its example inputs produce", async () => {

@@ -1,4 +1,7 @@
 import { resolveInvestigationEvidenceClosure } from "../application/investigation/InvestigationEvidence.js";
+import { resolveEvidenceSourceList } from "../application/EvidenceInputResolver.js";
+import { recordEvidenceSources } from "../application/investigation/recordEvidenceSources.js";
+import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 
 import type { BinarySessionPort } from "../application/binary/BinarySessionPort.js";
@@ -31,6 +34,7 @@ import { verifyReconstruction } from "../domain/reconstructionVerification.js";
 export const registerInvestigationTools = (
   server: EvidenceMcpServer,
   session: BinarySessionPort,
+  resources: ArtifactResourceScope,
 ): void => {
   const admission = withAdmittedAnalysis({ kind: "session", session });
   registerChangedBehavior(
@@ -38,13 +42,21 @@ export const registerInvestigationTools = (
     session,
     admission,
     toolContract("find_changed_behavior"),
+    resources,
   );
-  registerCallPath(server, session, admission, toolContract("build_call_path"));
+  registerCallPath(
+    server,
+    session,
+    admission,
+    toolContract("build_call_path"),
+    resources,
+  );
   registerStaticRuntime(
     server,
     session,
     admission,
     toolContract("correlate_static_and_runtime"),
+    resources,
   );
   registerReconstruction(
     server,
@@ -59,6 +71,7 @@ const registerChangedBehavior = (
   session: BinarySessionPort,
   admission: ReturnType<typeof withAdmittedAnalysis>,
   contract: ReturnType<typeof toolContract<"find_changed_behavior">>,
+  resources: ArtifactResourceScope,
 ): void => {
   const registration = applicationToolRegistrationOptions(contract);
   server.registerTool(contract.name, registration, async (input, context) =>
@@ -68,12 +81,45 @@ const registerChangedBehavior = (
       contract.name,
       context.mcpReq.signal,
       async () => {
+        const parsed = contract.inputSchema.safeParse(input);
+        if (!parsed.success) {
+          const rejected = await runDerivedOperation(
+            context,
+            contract.name,
+            (): never => {
+              findChangedBehavior(input);
+              throw new Error("Invalid changed-behavior input was accepted");
+            },
+          );
+          return server.delivery.toCallToolResult(rejected, contract);
+        }
+        const resolved = await resolveEvidenceSourceList(
+          parsed.data.comparisons,
+          "comparisons",
+          session.evidenceForAnalysis.bind(session),
+          {
+            operation: contract.name,
+            signal: context.mcpReq.signal,
+            resources,
+          },
+        );
+        if (!resolved.ok)
+          return server.delivery.toCallToolResult(resolved, contract);
         const computed = await runDerivedOperation(context, contract.name, () =>
-          findChangedBehavior(input),
+          findChangedBehavior({
+            ...parsed.data,
+            comparisons: resolved.value.records,
+          }),
         );
         if (!computed.ok)
           return server.delivery.toCallToolResult(computed, contract);
         const { result, comparisonEvidenceIds } = computed.value;
+        const recordedSources = recordEvidenceSources(
+          (source) => session.recordEvidence(source),
+          resolved.value.sources,
+        );
+        if (!recordedSources.ok)
+          return server.delivery.toCallToolResult(recordedSources, contract);
         const closure = resolveInvestigationEvidenceClosure(
           session,
           result.evidence_links,
@@ -127,6 +173,7 @@ const registerCallPath = (
   session: BinarySessionPort,
   admission: ReturnType<typeof withAdmittedAnalysis>,
   contract: ReturnType<typeof toolContract<"build_call_path">>,
+  resources: ArtifactResourceScope,
 ): void => {
   server.registerTool(
     contract.name,
@@ -138,21 +185,40 @@ const registerCallPath = (
         contract.name,
         context.mcpReq.signal,
         async () => {
-          const closure = resolveInvestigationEvidenceClosure(
-            session,
-            input.functions.map(({ evidence_id }) => evidence_id),
+          const resolved = await resolveEvidenceSourceList(
+            input.functions,
+            "functions",
+            session.evidenceForAnalysis.bind(session),
+            {
+              operation: contract.name,
+              signal: context.mcpReq.signal,
+              resources,
+            },
           );
-          if (!closure.ok)
-            return server.delivery.toCallToolResult(closure, contract);
-          const links = closure.value;
+          if (!resolved.ok)
+            return server.delivery.toCallToolResult(resolved, contract);
           const computed = await runDerivedOperation(
             context,
             contract.name,
-            () => buildCallPath(input),
+            () =>
+              buildCallPath({ ...input, functions: resolved.value.records }),
           );
           if (!computed.ok)
             return server.delivery.toCallToolResult(computed, contract);
           const result = computed.value;
+          const recordedSources = recordEvidenceSources(
+            (source) => session.recordEvidence(source),
+            resolved.value.sources,
+          );
+          if (!recordedSources.ok)
+            return server.delivery.toCallToolResult(recordedSources, contract);
+          const closure = resolveInvestigationEvidenceClosure(
+            session,
+            resolved.value.records.map(({ evidence_id }) => evidence_id),
+          );
+          if (!closure.ok)
+            return server.delivery.toCallToolResult(closure, contract);
+          const links = closure.value;
           const evidence = createEvidence(undefined, CALL_PATH_PROVIDER, {
             predicateType: "rea.call-path",
             operation: contract.name,
@@ -200,6 +266,7 @@ const registerStaticRuntime = (
   session: BinarySessionPort,
   admission: ReturnType<typeof withAdmittedAnalysis>,
   contract: ReturnType<typeof toolContract<"correlate_static_and_runtime">>,
+  resources: ArtifactResourceScope,
 ): void => {
   server.registerTool(
     contract.name,
@@ -211,29 +278,73 @@ const registerStaticRuntime = (
         contract.name,
         context.mcpReq.signal,
         async () => {
+          const parsed = contract.inputSchema.safeParse(input);
+          if (!parsed.success) {
+            const rejected = await runDerivedOperation(
+              context,
+              contract.name,
+              () => correlateStaticAndRuntime(input),
+            );
+            return server.delivery.toCallToolResult(rejected, contract);
+          }
+          const staticSources = await resolveEvidenceSourceList(
+            parsed.data.static_comparisons,
+            "static_comparisons",
+            session.evidenceForAnalysis.bind(session),
+            {
+              operation: contract.name,
+              signal: context.mcpReq.signal,
+              resources,
+            },
+          );
+          if (!staticSources.ok)
+            return server.delivery.toCallToolResult(staticSources, contract);
+          const runtimeSources = await resolveEvidenceSourceList(
+            parsed.data.runtime_comparisons,
+            "runtime_comparisons",
+            session.evidenceForAnalysis.bind(session),
+            {
+              operation: contract.name,
+              signal: context.mcpReq.signal,
+              resources,
+            },
+          );
+          if (!runtimeSources.ok)
+            return server.delivery.toCallToolResult(runtimeSources, contract);
+          const resolvedInput = {
+            ...parsed.data,
+            static_comparisons: [...staticSources.value.records],
+            runtime_comparisons: [...runtimeSources.value.records],
+          };
+          const computed = await runDerivedOperation(
+            context,
+            contract.name,
+            () => correlateStaticAndRuntime(resolvedInput),
+          );
+          if (!computed.ok)
+            return server.delivery.toCallToolResult(computed, contract);
+          const recordedSources = recordEvidenceSources(
+            (source) => session.recordEvidence(source),
+            [...staticSources.value.sources, ...runtimeSources.value.sources],
+          );
+          if (!recordedSources.ok)
+            return server.delivery.toCallToolResult(recordedSources, contract);
           const closure = resolveInvestigationEvidenceClosure(
             session,
             comparisonClosure([
-              ...input.static_comparisons,
-              ...input.runtime_comparisons,
+              ...resolvedInput.static_comparisons,
+              ...resolvedInput.runtime_comparisons,
             ]),
           );
           if (!closure.ok)
             return server.delivery.toCallToolResult(closure, contract);
           const links = closure.value;
-          const computed = await runDerivedOperation(
-            context,
-            contract.name,
-            () => correlateStaticAndRuntime(input),
-          );
-          if (!computed.ok)
-            return server.delivery.toCallToolResult(computed, contract);
           const result = computed.value;
           const evidence = createEvidence(undefined, STATIC_RUNTIME_PROVIDER, {
             predicateType: "rea.static-runtime-correlation",
             operation: contract.name,
             parameters: {
-              mapping_count: input.mappings.length,
+              mapping_count: resolvedInput.mappings.length,
             },
             result,
             confidence: "inferred",

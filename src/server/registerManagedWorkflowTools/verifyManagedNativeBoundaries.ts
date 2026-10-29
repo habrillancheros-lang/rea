@@ -3,6 +3,7 @@ import type { EvidenceMcpServer } from "../EvidenceMcpServer.js";
 import { runAdmittedToolOperation } from "../admittedToolOperation.js";
 import { recordEvidenceSources } from "../../application/investigation/recordEvidenceSources.js";
 
+import { resolveEvidenceSourceList } from "../../application/EvidenceInputResolver.js";
 import { executeManagedNativeBoundaries } from "../../application/managed/ManagedNativeVerificationService.js";
 import { logToolExecution } from "../toolLogging.js";
 import { toolRegistrationOptions } from "../toolRegistrationOptions.js";
@@ -28,10 +29,62 @@ export const registerVerifyManagedNativeBoundaries = (
         nativeVerificationContract.name,
         context.mcpReq.signal,
         async () => {
+          const parsed =
+            nativeVerificationContract.inputSchema.safeParse(input);
+          if (!parsed.success) {
+            const rejected = executeManagedNativeBoundaries(input);
+            if (rejected.ok)
+              throw new Error(
+                "Invalid managed native verification input was accepted",
+              );
+            return server.delivery.toCallToolResult(
+              rejected,
+              nativeVerificationContract,
+            );
+          }
+          const boundaries = await resolveEvidenceSourceList(
+            [parsed.data.managed_boundaries],
+            "managed_boundaries",
+            options.session.evidenceForAnalysis.bind(options.session),
+            {
+              operation: nativeVerificationContract.name,
+              signal: context.mcpReq.signal,
+              resources: options.artifactResources,
+            },
+          );
+          if (!boundaries.ok)
+            return server.delivery.toCallToolResult(
+              boundaries,
+              nativeVerificationContract,
+            );
+          const observations = await resolveEvidenceSourceList(
+            parsed.data.native_observations,
+            "native_observations",
+            options.session.evidenceForAnalysis.bind(options.session),
+            {
+              operation: nativeVerificationContract.name,
+              signal: context.mcpReq.signal,
+              resources: options.artifactResources,
+            },
+          );
+          if (!observations.ok)
+            return server.delivery.toCallToolResult(
+              observations,
+              nativeVerificationContract,
+            );
+          const boundary = boundaries.value.records[0];
+          if (boundary === undefined)
+            throw new Error("Managed boundary resolution lost its selection");
+          const resolvedInput = {
+            ...parsed.data,
+            managed_boundaries: boundary,
+            native_observations: [...observations.value.records],
+          };
           const result = await logToolExecution(
             options.logger,
             nativeVerificationContract.name,
-            () => Promise.resolve(executeManagedNativeBoundaries(input)),
+            () =>
+              Promise.resolve(executeManagedNativeBoundaries(resolvedInput)),
           );
           if (!result.ok)
             return server.delivery.toCallToolResult(
@@ -41,7 +94,11 @@ export const registerVerifyManagedNativeBoundaries = (
           const execution = result.value;
           const recordedSources = recordEvidenceSources(
             options.recordEvidence,
-            execution.sourceEvidence,
+            [
+              ...boundaries.value.sources,
+              ...observations.value.sources,
+              ...execution.sourceEvidence,
+            ],
           );
           if (!recordedSources.ok)
             return server.delivery.toCallToolResult(

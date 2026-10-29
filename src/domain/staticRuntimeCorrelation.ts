@@ -12,7 +12,8 @@ import {
   readComparisonResult,
   type ParsedComparisonEvidence,
 } from "./comparisonEvidenceResult.js";
-import { evidenceSchema, type Evidence } from "./evidence.js";
+import type { Evidence } from "./evidence.js";
+import { evidenceSourceInputSchema } from "./evidenceReference.js";
 import { hasComparisonEvidenceIdentity } from "./comparisonEvidenceIdentity.js";
 import { functionComparisonDimensionNameSchema } from "./functionComparisonSchemas.js";
 import type { JsonValue } from "./jsonValue.js";
@@ -80,8 +81,8 @@ const mappingSchema = z
 /** Strict input for explicit static/runtime hypothesis correlation. */
 export const staticRuntimeCorrelationInputSchema = z
   .object({
-    static_comparisons: z.array(evidenceSchema).min(1),
-    runtime_comparisons: z.array(evidenceSchema).min(1),
+    static_comparisons: z.array(evidenceSourceInputSchema).min(1),
+    runtime_comparisons: z.array(evidenceSourceInputSchema).min(1),
     mappings: z.array(mappingSchema).min(1),
   })
   .strict();

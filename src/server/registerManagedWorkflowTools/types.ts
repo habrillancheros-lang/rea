@@ -1,3 +1,4 @@
+import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import type {
   EvidenceWriter,
   EvidenceUnknownWriter,
@@ -15,4 +16,5 @@ export interface ManagedWorkflowToolRegistration {
     | EvidenceUnknownWriter["recordEvidenceWithUnknown"]
     | undefined;
   readonly session: BinarySessionPort;
+  readonly artifactResources: ArtifactResourceScope;
 }

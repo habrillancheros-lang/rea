@@ -13,6 +13,7 @@ import { inspectManagedNativeBoundariesBytes } from "../../../../src/dotnet/Mana
 import { executeManagedNativeBoundaries } from "../../../../src/application/managed/ManagedNativeVerificationService.js";
 import { MANAGED_NATIVE_VERIFICATION_EXAMPLE } from "../../../../src/contracts/managed/managedWorkflowExamples.js";
 import { createEvidence } from "../../../../src/domain/evidence.js";
+import type { Evidence } from "../../../../src/domain/evidence.js";
 import {
   managedNativeVerificationInputSchema,
   managedNativeVerificationResultSchema,
@@ -33,10 +34,16 @@ const readFixtureSource = (input: unknown) => {
   return source.value;
 };
 
-const exampleInput = () =>
-  managedNativeVerificationInputSchema.parse(
+const exampleInput = () => {
+  const input = managedNativeVerificationInputSchema.parse(
     MANAGED_NATIVE_VERIFICATION_EXAMPLE,
   );
+  return {
+    ...input,
+    managed_boundaries: input.managed_boundaries as Evidence,
+    native_observations: input.native_observations as Evidence[],
+  };
+};
 
 const nativeEvidenceWithExports = (
   names: readonly string[],

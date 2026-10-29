@@ -1234,6 +1234,7 @@ const registerBinaryAnalysisTools = ({
   recordEvidence,
   recordEvidenceWithUnknown,
   evidenceById,
+  artifactResources,
   withAdmittedAnalysis,
 }: ServerToolContext): void => {
   const recordUnknown =
@@ -1281,6 +1282,7 @@ const registerBinaryAnalysisTools = ({
       recordEvidence,
       recordEvidenceWithUnknown,
       session,
+      artifactResources,
       withAdmittedAnalysis,
     });
 };

@@ -43,6 +43,7 @@ import {
 import { InvestigationRecords } from "../investigation/InvestigationRecords.js";
 import { recordEvidenceSources } from "../investigation/recordEvidenceSources.js";
 import { BinarySessionRecords } from "./BinarySessionRecords.js";
+import type { ProjectEvidenceStore } from "../investigation/ProjectEvidenceStore.js";
 import { binarySessionStatus } from "./BinarySessionStatus.js";
 import { isSourceEvidenceRetainable } from "./AnalysisSnapshotCache.js";
 import type { BinarySessionDetail } from "../../contracts/sessionStatusContract.js";
@@ -201,8 +202,9 @@ export class BinarySession
     providerRouter: SessionProviderRouter,
     records: InvestigationRecords = new InvestigationRecords(),
     bundleResourceFactory?: BundleResourceClientFactory,
+    evidenceStore?: ProjectEvidenceStore,
   ) {
-    super(records);
+    super(records, evidenceStore);
     this.#providerRouter = providerRouter;
     this.#bundleResourceFactory = bundleResourceFactory;
   }
@@ -871,7 +873,12 @@ export class BinarySession
   ): Promise<Result<null, AnalysisError>> {
     return this.#serialize(async (admittedThrough) => {
       await this.#drainCalls(admittedThrough);
-      return this.#closeActive(options);
+      const closed = await this.#closeActive(options);
+      const flushed = await this.flushEvidenceStore();
+      if (flushed.ok) return closed;
+      return closed.ok
+        ? flushed
+        : err(analysisErrorWithCleanupFailure(closed.error, flushed.error));
     });
   }
 
@@ -898,6 +905,16 @@ export class BinarySession
         evidence_records: snapshot.value.evidence_bundle.records.length,
       };
       const closed = await this.#closeActive(options);
+      const flushed = await this.flushEvidenceStore();
+      if (!flushed.ok)
+        return err(
+          retainSavedAnalysisSnapshot(
+            closed.ok
+              ? flushed.error
+              : analysisErrorWithCleanupFailure(closed.error, flushed.error),
+            receipt,
+          ),
+        );
       return closed.ok
         ? ok(receipt)
         : err(retainSavedAnalysisSnapshot(closed.error, receipt));

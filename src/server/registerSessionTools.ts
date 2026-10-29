@@ -408,7 +408,12 @@ export const registerSessionTools = (
       });
     }
   };
-  registerProcessComparisonTool(server, session, compareContract);
+  registerProcessComparisonTool(
+    server,
+    session,
+    compareContract,
+    options.artifactResources,
+  );
   registerArtifactComparisonTool(
     server,
     session,
@@ -428,7 +433,7 @@ export const registerSessionTools = (
     compareBundlesContract,
     options.artifactResources,
   );
-  registerInvestigationTools(server, session);
+  registerInvestigationTools(server, session, options.artifactResources);
   registerUnknownTools({ server, session });
   registerContextTools(server, session);
 };

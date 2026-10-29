@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { emptyArraySchema } from "./emptyArraySchema.js";
-import { evidenceSchema } from "./evidence.js";
+import { evidenceSourceInputSchema } from "./evidenceReference.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 import {
   nativeAddressSchema,
@@ -11,7 +11,7 @@ const evidenceIdSchema = prefixedDigestSchema("ev");
 
 /** Strict input for explicit call-path reconstruction from complete dossiers. */
 export const callPathInputSchema = z.strictObject({
-  functions: z.array(evidenceSchema).min(1),
+  functions: z.array(evidenceSourceInputSchema).min(1),
   start: z.object({ address: nativeAddressInputSchema }).strict(),
   goal: z.object({ address: nativeAddressInputSchema }).strict(),
 });

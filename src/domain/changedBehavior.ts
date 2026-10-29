@@ -23,13 +23,14 @@ import {
   comparisonStatusSchema,
   processCaptureComparisonSchema,
 } from "./process/processComparison.js";
+import { evidenceSourceInputSchema } from "./evidenceReference.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
 
 const evidenceIdSchema = prefixedDigestSchema("ev");
 
 /** Input for aggregating existing comparison Evidence. */
 export const changedBehaviorInputSchema = z.strictObject({
-  comparisons: z.array(evidenceSchema).min(1),
+  comparisons: z.array(evidenceSourceInputSchema).min(1),
 });
 
 const findingSchema = z.object({

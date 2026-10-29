@@ -53,8 +53,33 @@ reject the summary record. Give `compare_functions` the retained dossier as
 `{"kind": "retained-evidence", "evidence_id": "<parent_evidence_id>"}`; give
 `match_native_functions` the same reference inside `left_observations` or
 `right_observations`, since its `left` and `right` take `list_procedures`
-Evidence. Request `detail: "complete"` for `build_call_path`, which accepts
-only inline complete dossiers.
+Evidence. `build_call_path` also requires complete dossiers, but accepts them
+as retained references or as `{"kind": "evidence-file", "path":
+"/absolute/sources.json", "evidence_id": "<parent_evidence_id>"}` selections
+from an authenticated Evidence file or bundle. `find_changed_behavior`,
+`correlate_static_and_runtime`, and `compare_process_captures` accept the same
+inline, retained, and file forms for their input records.
+`compare_managed_members`, `verify_managed_native_boundaries`, and
+`project_managed_application_graph` accept the same reference forms for their
+managed sources, and the Android, Apple, and Harmony application graph
+projections accept them for `inventory_evidence`. File-backed workflow inputs
+retain the selected record's available source closure; missing linked Evidence
+remains an integrity error.
+
+### Project Evidence store
+
+Set `REA_EVIDENCE_STORE=project` in the server environment to persist
+authenticated Evidence under `.rea/evidence` in the server process's current
+working directory. Set `REA_EVIDENCE_STORE_DIR` to an absolute store root,
+normally `<project>/.rea/evidence`, when the client launches the server
+elsewhere. The store is
+content-addressed by `evidence_id`, writes through a temporary file and rename,
+and re-authenticates every record before a later session can use it. Tampered
+or malformed files are treated as missing. Writes are flushed when the session
+closes, and a failed flush is reported as a cleanup failure rather than a
+durable record. Unknowns are not persisted by this first store slice, and an
+exported session bundle still contains only that session's records. The store
+is a lookup source for later sessions, not an implicit bundle import.
 
 Saved records from the pre-6.6 identity projection that omitted
 `relationship_coverage: null` from its digest remain incompatible, even when

@@ -135,7 +135,7 @@ export const SESSION_TOOL_CONTRACTS = [
   ),
   session(
     "correlate_static_and_runtime",
-    "Evaluate every explicit caller-declared hypothesis between exact static comparison findings and runtime comparison dimensions. Similar names or paths are never auto-matched, consistent cochange never proves causality, and unknown or truncated inputs remain unresolved. Returns all correlations and their complete Evidence closure inline.",
+    "Evaluate every explicit caller-declared hypothesis between exact static comparison findings and runtime comparison dimensions. Each comparison input may be inline Evidence, a retained-evidence reference, or an evidence-file selection with its available linked sources. Similar names or paths are never auto-matched, consistent cochange never proves causality, and unknown or truncated inputs remain unresolved. Returns all correlations and their complete Evidence closure inline.",
     staticRuntimeCorrelationInputSchema,
   ),
   session(

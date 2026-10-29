@@ -157,6 +157,55 @@ it("advertises and executes Android and Apple inventory projections", async () =
   });
 });
 
+it("accepts retained and Evidence-file inventory projections", async () => {
+  const client = await connect();
+  const root = await createTestTempDirectory("rea-mobile-graph-refs-");
+  const inventory = parseEvidence(
+    await runProviderAnalysis(
+      await writeApk(root),
+      "inventory_artifact",
+      {},
+    ).then(projectCliAnalysisResult),
+  );
+  const inline = await client.callTool({
+    name: "project_android_application_graph",
+    arguments: { inventory_evidence: [inventory] },
+  });
+  if (inline.isError === true) throw new Error(JSON.stringify(inline, null, 2));
+  const retained = await client.callTool({
+    name: "project_android_application_graph",
+    arguments: {
+      inventory_evidence: [
+        { kind: "retained-evidence", evidence_id: inventory.evidence_id },
+      ],
+    },
+  });
+  expect(retained.isError, JSON.stringify(retained)).not.toBe(true);
+  expect(retained.structuredContent).toEqual(inline.structuredContent);
+
+  const bundlePath = join(root, "mobile-graph.json");
+  const exported = await client.callTool({
+    name: "export_evidence_bundle",
+    arguments: { path: bundlePath },
+  });
+  expect(exported.isError, JSON.stringify(exported)).not.toBe(true);
+  const fileClient = await connect();
+  const fromFile = await fileClient.callTool({
+    name: "project_android_application_graph",
+    arguments: {
+      inventory_evidence: [
+        {
+          kind: "evidence-file",
+          path: bundlePath,
+          evidence_id: inventory.evidence_id,
+        },
+      ],
+    },
+  });
+  expect(fromFile.isError, JSON.stringify(fromFile)).not.toBe(true);
+  expect(fromFile.structuredContent).toEqual(inline.structuredContent);
+});
+
 it("projects a single inventory page as partial and links only that source", async () => {
   const client = await connect();
   const root = await createTestTempDirectory("rea-mobile-partial-page-mcp-");

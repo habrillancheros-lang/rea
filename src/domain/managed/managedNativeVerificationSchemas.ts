@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { emptyArraySchema } from "../emptyArraySchema.js";
-import { evidenceSchema } from "../evidence.js";
+import { evidenceSourceInputSchema } from "../evidenceReference.js";
 import {
   cliMetadataGuidSchema,
   managedNativeImportSchema,
@@ -98,16 +98,18 @@ export type PinvokeVerification = z.infer<typeof pinvokeVerificationSchema>;
 /** Authenticated managed boundary Evidence plus native observations. */
 export const managedNativeVerificationInputSchema = z
   .strictObject({
-    managed_boundaries: evidenceSchema,
+    managed_boundaries: evidenceSourceInputSchema,
     native_observations: z
-      .array(evidenceSchema)
+      .array(evidenceSourceInputSchema)
       .min(1)
       .describe("Native function or export Evidence records"),
   })
   .superRefine((input, context) => {
+    const boundaryId = input.managed_boundaries.evidence_id;
     const ids = new Set<string>();
     for (const [index, evidence] of input.native_observations.entries()) {
-      if (evidence.evidence_id === input.managed_boundaries.evidence_id) {
+      const id = evidence.evidence_id;
+      if (boundaryId !== undefined && id === boundaryId) {
         context.addIssue({
           code: "custom",
           path: ["native_observations", index],
@@ -115,14 +117,16 @@ export const managedNativeVerificationInputSchema = z
             "Native observation Evidence must be distinct from managed boundary Evidence",
         });
       }
-      if (ids.has(evidence.evidence_id)) {
-        context.addIssue({
-          code: "custom",
-          path: ["native_observations", index],
-          message: "Native observation Evidence IDs must be unique",
-        });
+      if (id !== undefined) {
+        if (ids.has(id)) {
+          context.addIssue({
+            code: "custom",
+            path: ["native_observations", index],
+            message: "Native observation Evidence IDs must be unique",
+          });
+        }
+        ids.add(id);
       }
-      ids.add(evidence.evidence_id);
     }
   });
 

@@ -6,7 +6,7 @@ import {
   ArtifactInventoryCarrierError,
   type ParsedInventorySet,
 } from "./artifactInventoryEvidence.js";
-import { evidenceSchema } from "./evidence.js";
+import { evidenceSourceInputSchema } from "./evidenceReference.js";
 import { AnalysisInputError } from "./analysisErrorCore.js";
 import { EvidenceIntegrityError } from "./evidenceErrors.js";
 import { analysisInputErrorFromIssues } from "./inputIssueProjection.js";
@@ -19,7 +19,7 @@ export const projectionPathSchema = z.string().min(1);
 
 /** Inventory pages accepted by every application graph projection. */
 export const applicationInventoryProjectionInputSchema = z.strictObject({
-  inventory_evidence: z.array(evidenceSchema).min(1),
+  inventory_evidence: z.array(evidenceSourceInputSchema).min(1),
 });
 
 const applicationInventoryRequestSchema =

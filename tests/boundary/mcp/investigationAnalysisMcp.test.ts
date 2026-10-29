@@ -1,6 +1,9 @@
 import { parseEvidence, createEvidence } from "../../../src/domain/evidence.js";
+import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import { ok as resultOk } from "../../../src/domain/result.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, it } from "vitest";
 
 import {
@@ -24,6 +27,7 @@ import {
 import { jsonObjectSchema } from "../../../src/domain/jsonValue.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { observed } from "../../fixtures/analysisExecution.js";
+import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import type { RelationshipCoverage } from "../../../src/domain/relationshipCoverage.js";
 
 it("aggregates comparison Evidence and records an approved runtime gap", async () => {
@@ -111,6 +115,208 @@ it("builds exact-address paths with qualified callees and dossier citations", as
     });
   } finally {
     await close(session, server, client);
+  }
+});
+
+it("resolves retained Evidence inputs for changed behavior and call paths", async () => {
+  const { session, server, client } = await connected();
+  const comparison =
+    INVESTIGATION_EXAMPLES.find_changed_behavior.comparisons[0];
+  if (comparison === undefined) throw new Error("missing comparison fixture");
+  const dossier = FUNCTION_COMPARISON_EXAMPLE.left;
+  for (const evidence of [
+    FUNCTION_COMPARISON_EXAMPLE.left,
+    FUNCTION_COMPARISON_EXAMPLE.right,
+    comparison,
+  ])
+    expect(session.recordEvidence(evidence).ok).toBe(true);
+  try {
+    const changed = await client.callTool({
+      name: "find_changed_behavior",
+      arguments: {
+        comparisons: [
+          {
+            kind: "retained-evidence",
+            evidence_id: comparison.evidence_id,
+          },
+        ],
+      },
+    });
+    expect(changed.isError, JSON.stringify(changed)).not.toBe(true);
+    expect(inlineEvidence(changed.structuredContent)).toMatchObject({
+      normalized_result: { behavior_status: "unknown" },
+      evidence_links: expect.arrayContaining([
+        comparison.evidence_id,
+        dossier.evidence_id,
+      ]),
+    });
+
+    const path = await client.callTool({
+      name: "build_call_path",
+      arguments: {
+        ...INVESTIGATION_EXAMPLES.build_call_path,
+        functions: [
+          { kind: "retained-evidence", evidence_id: dossier.evidence_id },
+        ],
+      },
+    });
+    expect(path.isError, JSON.stringify(path)).not.toBe(true);
+    expect(inlineEvidence(path.structuredContent)).toMatchObject({
+      normalized_result: { status: "found", shortest_hops: 0 },
+      evidence_links: [dossier.evidence_id],
+    });
+  } finally {
+    await close(session, server, client);
+  }
+});
+
+it("loads selected Evidence files and their source closure without prior session records", async () => {
+  const { session, server, client } = await connected();
+  const comparison =
+    INVESTIGATION_EXAMPLES.find_changed_behavior.comparisons[0];
+  if (comparison === undefined) throw new Error("missing comparison fixture");
+  const dossier = FUNCTION_COMPARISON_EXAMPLE.left;
+  const root = await createTestTempDirectory("rea-investigation-sources-");
+  const sourcePath = join(root, "sources.json");
+  await writeFile(
+    sourcePath,
+    JSON.stringify(
+      createEvidenceBundle([
+        FUNCTION_COMPARISON_EXAMPLE.left,
+        FUNCTION_COMPARISON_EXAMPLE.right,
+        comparison,
+      ]),
+    ),
+  );
+  try {
+    const changed = await client.callTool({
+      name: "find_changed_behavior",
+      arguments: {
+        comparisons: [
+          {
+            kind: "evidence-file",
+            path: sourcePath,
+            evidence_id: comparison.evidence_id,
+          },
+        ],
+      },
+    });
+    expect(changed.isError, JSON.stringify(changed)).not.toBe(true);
+    expect(inlineEvidence(changed.structuredContent)).toMatchObject({
+      normalized_result: { behavior_status: "unknown" },
+      evidence_links: expect.arrayContaining([
+        comparison.evidence_id,
+        dossier.evidence_id,
+        FUNCTION_COMPARISON_EXAMPLE.right.evidence_id,
+      ]),
+    });
+
+    const path = await client.callTool({
+      name: "build_call_path",
+      arguments: {
+        ...INVESTIGATION_EXAMPLES.build_call_path,
+        functions: [
+          {
+            kind: "evidence-file",
+            path: sourcePath,
+            evidence_id: dossier.evidence_id,
+          },
+        ],
+      },
+    });
+    expect(path.isError, JSON.stringify(path)).not.toBe(true);
+    expect(inlineEvidence(path.structuredContent)).toMatchObject({
+      normalized_result: { status: "found", shortest_hops: 0 },
+      evidence_links: [dossier.evidence_id],
+    });
+  } finally {
+    await close(session, server, client);
+  }
+});
+
+it("resolves retained and file correlation inputs with their source closure", async () => {
+  const correlation = INVESTIGATION_EXAMPLES.correlate_static_and_runtime;
+  const records = [
+    FUNCTION_COMPARISON_EXAMPLE.left,
+    FUNCTION_COMPARISON_EXAMPLE.right,
+    FUNCTION_COMPARISON_EVIDENCE,
+    PROCESS_CAPTURE_REFERENCE,
+    PROCESS_CAPTURE_RECONSTRUCTION,
+    PROCESS_COMPARISON_EVIDENCE,
+  ];
+  const retainedRun = await connected();
+  try {
+    for (const record of records)
+      expect(retainedRun.session.recordEvidence(record).ok).toBe(true);
+    const response = await retainedRun.client.callTool({
+      name: "correlate_static_and_runtime",
+      arguments: {
+        ...correlation,
+        static_comparisons: [
+          {
+            kind: "retained-evidence",
+            evidence_id: FUNCTION_COMPARISON_EVIDENCE.evidence_id,
+          },
+        ],
+        runtime_comparisons: [
+          {
+            kind: "retained-evidence",
+            evidence_id: PROCESS_COMPARISON_EVIDENCE.evidence_id,
+          },
+        ],
+      },
+    });
+    expect(response.isError, JSON.stringify(response)).not.toBe(true);
+    expect(inlineEvidence(response.structuredContent)).toMatchObject({
+      normalized_result: { status: "correlated" },
+      evidence_links: expect.arrayContaining([
+        FUNCTION_COMPARISON_EVIDENCE.evidence_id,
+        PROCESS_COMPARISON_EVIDENCE.evidence_id,
+      ]),
+    });
+  } finally {
+    await close(retainedRun.session, retainedRun.server, retainedRun.client);
+  }
+
+  const fileRun = await connected();
+  const root = await createTestTempDirectory("rea-correlation-sources-");
+  const sourcePath = join(root, "sources.json");
+  await writeFile(sourcePath, JSON.stringify(createEvidenceBundle(records)));
+  try {
+    const response = await fileRun.client.callTool({
+      name: "correlate_static_and_runtime",
+      arguments: {
+        ...correlation,
+        static_comparisons: [
+          {
+            kind: "evidence-file",
+            path: sourcePath,
+            evidence_id: FUNCTION_COMPARISON_EVIDENCE.evidence_id,
+          },
+        ],
+        runtime_comparisons: [
+          {
+            kind: "evidence-file",
+            path: sourcePath,
+            evidence_id: PROCESS_COMPARISON_EVIDENCE.evidence_id,
+          },
+        ],
+      },
+    });
+    expect(response.isError, JSON.stringify(response)).not.toBe(true);
+    const evidence = inlineEvidence(response.structuredContent);
+    expect(evidence).toMatchObject({
+      normalized_result: { status: "correlated" },
+    });
+    expect(evidence.evidence_links).toEqual(
+      expect.arrayContaining(records.map(({ evidence_id }) => evidence_id)),
+    );
+    for (const record of records)
+      expect(fileRun.session.evidenceForAnalysis(record.evidence_id)).toEqual(
+        record,
+      );
+  } finally {
+    await close(fileRun.session, fileRun.server, fileRun.client);
   }
 });
 

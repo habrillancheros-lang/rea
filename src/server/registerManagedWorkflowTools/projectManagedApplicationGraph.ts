@@ -2,6 +2,7 @@ import type { EvidenceMcpServer } from "../EvidenceMcpServer.js";
 import { runAdmittedToolOperation } from "../admittedToolOperation.js";
 import { recordEvidenceSources } from "../../application/investigation/recordEvidenceSources.js";
 
+import { resolveEvidenceSourceList } from "../../application/EvidenceInputResolver.js";
 import { projectManagedGraphEvidence } from "../../application/managed/ManagedApplicationGraphService.js";
 import { readManagedGraphProjection } from "../../domain/managed/managedApplicationGraph.js";
 import type { Evidence } from "../../domain/evidence.js";
@@ -28,7 +29,50 @@ export const registerProjectManagedApplicationGraph = (
         graphContract.name,
         context.mcpReq.signal,
         async () => {
-          const request = readManagedGraphProjection(input);
+          const parsed = graphContract.inputSchema.safeParse(input);
+          let projectionInput: unknown = input;
+          const selectedSources: Evidence[] = [];
+          if (parsed.success) {
+            const resolvedFields: {
+              managed_artifact?: Evidence;
+              managed_members?: Evidence;
+              managed_native_boundaries?: Evidence;
+            } = {};
+            for (const [field, value] of [
+              ["managed_artifact", parsed.data.managed_artifact],
+              ["managed_members", parsed.data.managed_members],
+              [
+                "managed_native_boundaries",
+                parsed.data.managed_native_boundaries,
+              ],
+            ] as const) {
+              if (value === undefined) continue;
+              const resolved = await resolveEvidenceSourceList(
+                [value],
+                field,
+                options.session.evidenceForAnalysis.bind(options.session),
+                {
+                  operation: graphContract.name,
+                  signal: context.mcpReq.signal,
+                  resources: options.artifactResources,
+                },
+              );
+              if (!resolved.ok)
+                return server.delivery.toCallToolResult(
+                  resolved,
+                  graphContract,
+                );
+              const record = resolved.value.records[0];
+              if (record === undefined)
+                throw new Error(
+                  "Managed graph source resolution lost its selection",
+                );
+              resolvedFields[field] = record;
+              selectedSources.push(...resolved.value.sources);
+            }
+            projectionInput = { ...parsed.data, ...resolvedFields };
+          }
+          const request = readManagedGraphProjection(projectionInput);
           if (!request.ok)
             return server.delivery.toCallToolResult(request, graphContract);
           const result = await logToolExecution(
@@ -42,6 +86,7 @@ export const registerProjectManagedApplicationGraph = (
           const recordedSources = recordEvidenceSources(
             options.recordEvidence,
             [
+              ...selectedSources,
               request.value.sources.artifact?.evidence,
               request.value.sources.members?.evidence,
               request.value.sources.boundaries?.evidence,

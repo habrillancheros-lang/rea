@@ -118,6 +118,66 @@ export const resolvePairedEvidenceSources = async <
   return ok({ ...input, left: left.value, right: right.value });
 };
 
+export interface ResolvedEvidenceSourceList {
+  readonly records: readonly Evidence[];
+  readonly sources: readonly Evidence[];
+}
+
+/** Resolve a homogeneous list while retaining every available linked source. */
+export const resolveEvidenceSourceList = async (
+  inputs: readonly EvidenceSourceInput[],
+  field: string,
+  lookup: EvidenceLookup | undefined,
+  options: EvidenceFileReadOptions & { readonly operation: string },
+): Promise<Result<ResolvedEvidenceSourceList, AnalysisError>> => {
+  const records: Evidence[] = [];
+  const sources = new Map<string, Evidence>();
+  for (const [index, input] of inputs.entries()) {
+    const related = new Map<string, Evidence>();
+    const collect = (
+      selected: Evidence,
+      relatedLookup: EvidenceLookup | undefined,
+    ): Result<Evidence, AnalysisError> => {
+      collectAvailableEvidenceClosure(selected, relatedLookup, related);
+      return ok(selected);
+    };
+    const selected =
+      "kind" in input && input.kind === "evidence-file"
+        ? await readEvidenceFileSource(input.path, options, input.evidence_id, {
+            operation: options.operation,
+            path: [field, index],
+            resolveSelected: (record, fileLookup) =>
+              collect(record, (id) => fileLookup(id) ?? lookup?.(id)),
+          })
+        : resolveEvidenceInput(input, lookup);
+    if (!selected.ok) return selected;
+    if (!("kind" in input) || input.kind !== "evidence-file")
+      collect(selected.value, lookup);
+    records.push(selected.value);
+    for (const [id, source] of related) sources.set(id, source);
+  }
+  return ok({ records, sources: [...sources.values()] });
+};
+
+const collectAvailableEvidenceClosure = (
+  selected: Evidence,
+  lookup: EvidenceLookup | undefined,
+  sources: Map<string, Evidence>,
+): void => {
+  const pending = [selected];
+  while (pending.length > 0) {
+    const record = pending.pop();
+    if (record === undefined || sources.has(record.evidence_id)) continue;
+    sources.set(record.evidence_id, record);
+    for (const id of record.evidence_links) {
+      if (sources.has(id)) continue;
+      const linked = lookup?.(id);
+      // Missing or mismatched links remain for the workflow's closure check.
+      if (linked?.evidence_id === id) pending.push(linked);
+    }
+  }
+};
+
 const resolveEvidenceSource = async (
   input: EvidenceSourceInput,
   side: "left" | "right",

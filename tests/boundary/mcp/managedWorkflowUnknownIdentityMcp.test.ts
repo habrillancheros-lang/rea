@@ -1,6 +1,10 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
 import { expect, it, onTestFinished } from "vitest";
 
 import {
+  MANAGED_APPLICATION_GRAPH_EXAMPLE,
   MANAGED_NATIVE_VERIFICATION_EXAMPLE,
   MANAGED_RECONSTRUCTION_IMPORT_EXAMPLE,
 } from "../../../src/contracts/managed/managedWorkflowExamples.js";
@@ -15,6 +19,7 @@ import { managedNativeVerificationResultSchema } from "../../../src/domain/manag
 import { inspectMachoSchema } from "../../../src/domain/native/nativeInspection.js";
 import { createApplicationMcpHarness } from "../../fixtures/applicationMcpHarness.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
+import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 
 const emptyExportEvidence = () => {
   const original = MANAGED_NATIVE_VERIFICATION_EXAMPLE.native_observations[0];
@@ -295,4 +300,100 @@ it("retains distinct unresolved managed member comparisons and exact replay", as
       ]),
     },
   });
+});
+
+it("resolves retained and Evidence-file sources across managed workflows", async () => {
+  const harness = await createApplicationMcpHarness({
+    session: createTestBinarySession(() => {
+      throw new Error("Managed workflows must not launch a provider");
+    }),
+  });
+  onTestFinished(harness.close);
+  const { client, session } = harness;
+  const left = memberEvidence("members-left", "d".repeat(64), "Main", false);
+  const right = memberEvidence("members-right", "e".repeat(64), null, true);
+  const managed = MANAGED_NATIVE_VERIFICATION_EXAMPLE.managed_boundaries;
+  const native = MANAGED_NATIVE_VERIFICATION_EXAMPLE.native_observations[0];
+  if (native === undefined)
+    throw new Error("Missing managed native observation fixture");
+  const members = MANAGED_APPLICATION_GRAPH_EXAMPLE.managed_members;
+  for (const record of [left, right, managed, native, members])
+    expect(session.recordEvidence(record).ok).toBe(true);
+
+  const compare = await client.callTool({
+    name: "compare_managed_members",
+    arguments: {
+      left: { kind: "retained-evidence", evidence_id: left.evidence_id },
+      right: { kind: "retained-evidence", evidence_id: right.evidence_id },
+    },
+  });
+  expect(compare.isError, JSON.stringify(compare.content)).not.toBe(true);
+  expect(parseEvidence(compare.structuredContent)).toMatchObject({
+    evidence_links: expect.arrayContaining([
+      left.evidence_id,
+      right.evidence_id,
+    ]),
+  });
+
+  const verify = await client.callTool({
+    name: "verify_managed_native_boundaries",
+    arguments: {
+      managed_boundaries: {
+        kind: "retained-evidence",
+        evidence_id: managed.evidence_id,
+      },
+      native_observations: [
+        { kind: "retained-evidence", evidence_id: native.evidence_id },
+      ],
+    },
+  });
+  expect(verify.isError, JSON.stringify(verify.content)).not.toBe(true);
+
+  const graph = await client.callTool({
+    name: "project_managed_application_graph",
+    arguments: {
+      managed_members: {
+        kind: "retained-evidence",
+        evidence_id: members.evidence_id,
+      },
+    },
+  });
+  expect(graph.isError, JSON.stringify(graph.content)).not.toBe(true);
+
+  const root = await createTestTempDirectory("rea-managed-sources-");
+  const bundlePath = join(root, "managed.json");
+  await writeFile(bundlePath, JSON.stringify(session.exportEvidenceBundle()));
+  const fileHarness = await createApplicationMcpHarness({
+    session: createTestBinarySession(() => {
+      throw new Error("Managed file workflows must not launch a provider");
+    }),
+  });
+  onTestFinished(fileHarness.close);
+  const fromFile = await fileHarness.client.callTool({
+    name: "compare_managed_members",
+    arguments: {
+      left: {
+        kind: "evidence-file",
+        path: bundlePath,
+        evidence_id: left.evidence_id,
+      },
+      right: {
+        kind: "evidence-file",
+        path: bundlePath,
+        evidence_id: right.evidence_id,
+      },
+    },
+  });
+  expect(fromFile.isError, JSON.stringify(fromFile.content)).not.toBe(true);
+  const graphFile = await fileHarness.client.callTool({
+    name: "project_managed_application_graph",
+    arguments: {
+      managed_members: {
+        kind: "evidence-file",
+        path: bundlePath,
+        evidence_id: members.evidence_id,
+      },
+    },
+  });
+  expect(graphFile.isError, JSON.stringify(graphFile.content)).not.toBe(true);
 });
