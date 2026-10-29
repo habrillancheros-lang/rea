@@ -95,8 +95,14 @@ export function createArtifactReader(
           : rootSource,
       );
     case "bun-standalone":
-      return new BunStandaloneArtifactReader(path,
-        admission !== undefined && "kind" in admission && admission.kind === "bun-standalone" ? admission : rootSource);
+      return new BunStandaloneArtifactReader(
+        path,
+        admission !== undefined &&
+          "kind" in admission &&
+          admission.kind === "bun-standalone"
+          ? admission
+          : rootSource,
+      );
     case "dotnet-bundle":
       return new DotnetBundleArtifactReader(
         path,

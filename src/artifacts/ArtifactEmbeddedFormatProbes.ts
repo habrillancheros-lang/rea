@@ -1,4 +1,7 @@
-import { probeBunStandaloneGraph, type BunStandaloneProbe } from "./bun/BunModuleGraphLayout.js";
+import {
+  probeBunStandaloneGraph,
+  type BunStandaloneProbe,
+} from "./bun/BunModuleGraphLayout.js";
 import type {
   StableRegularFileDescriptor,
   RegularFileState,
@@ -117,8 +120,13 @@ export class ArtifactEmbeddedFormatProbes {
 
   async bunStandalone(): Promise<BunStandaloneProbe> {
     abortIfNeeded(this.signal);
-    if (this.#facts.bunStandalone !== undefined) return this.#facts.bunStandalone;
-    const observed = await probeBunStandaloneGraph(this.source.handle, this.source.initial.size, this.signal);
+    if (this.#facts.bunStandalone !== undefined)
+      return this.#facts.bunStandalone;
+    const observed = await probeBunStandaloneGraph(
+      this.source.handle,
+      this.source.initial.size,
+      this.signal,
+    );
     abortIfNeeded(this.signal);
     this.#facts = { ...this.#facts, bunStandalone: observed };
     return observed;

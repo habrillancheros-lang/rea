@@ -300,7 +300,8 @@ const classifyRootFormat = async (
       return { kind: "node-sea", source, location: sea, decoded };
     }
     const bun = await embeddedProbes.bunStandalone();
-    if (bun.status === "present") return {kind: "bun-standalone", source, probe: bun};
+    if (bun.status === "present")
+      return { kind: "bun-standalone", source, probe: bun };
     const packaged = await embeddedProbes.pyInstaller();
     abortIfNeeded(signal);
     if (format !== "mach-o-universal") {
