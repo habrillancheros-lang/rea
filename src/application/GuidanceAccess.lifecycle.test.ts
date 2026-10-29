@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { awaitAcknowledgement } from "../../tests/fixtures/lifecycleAcknowledgement.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { RetainedRegularFileCleanupFailure } from "./RegularFileRead.js";
@@ -22,13 +23,7 @@ it.each(["search", "read"] as const)(
   "finishes every guide in an admitted %s while shutdown waits",
   async (action) => {
     const resources = new ArtifactResourceScope();
-    const initial = await searchGuidanceWithReader(
-      { query: "needle" },
-      async (path) => content(path),
-      resources,
-    );
-    if (!initial.ok || initial.value.status !== "matches")
-      throw new Error("Expected match");
+
     const reached = gate();
     const resume = gate();
     const paths: string[] = [];
@@ -41,30 +36,50 @@ it.each(["search", "read"] as const)(
         }
         return content(path);
       });
-    const operation =
-      action === "search"
-        ? searchGuidanceWithReader({ query: "needle" }, reader, resources)
-        : readGuidanceSectionWithReader(
-            { locator: initial.value.matches[0]?.locator },
-            reader,
-            resources,
-          );
-    await reached.promise;
-    let closed = false;
-    const closing = resources.close().then(() => {
-      closed = true;
-    });
-    await Promise.resolve();
-    expect(closed).toBe(false);
-    resume.release();
-    expect(await operation).toMatchObject({
-      ok: true,
-      value: { status: action === "search" ? "matches" : "section" },
-    });
-    await closing;
-    expect(paths).toEqual(MANAGED_SKILL_FILES);
-    expect(closed).toBe(true);
-    expect(resources.hasPending).toBe(false);
+    const launched: Promise<unknown>[] = [];
+    try {
+      const initial = await searchGuidanceWithReader(
+        { query: "needle" },
+        async (path) => content(path),
+        resources,
+      );
+      if (!initial.ok || initial.value.status !== "matches")
+        throw new Error("Expected match");
+      const operation =
+        action === "search"
+          ? searchGuidanceWithReader({ query: "needle" }, reader, resources)
+          : readGuidanceSectionWithReader(
+              { locator: initial.value.matches[0]?.locator },
+              reader,
+              resources,
+            );
+      launched.push(operation);
+      await awaitAcknowledgement(
+        reached.promise,
+        operation,
+        "second guidance read",
+      );
+      let closed = false;
+      const closing = resources.close().then(() => {
+        closed = true;
+      });
+      launched.push(closing);
+      await Promise.resolve();
+      expect(closed).toBe(false);
+      resume.release();
+      expect(await operation).toMatchObject({
+        ok: true,
+        value: { status: action === "search" ? "matches" : "section" },
+      });
+      await closing;
+      expect(paths).toEqual(MANAGED_SKILL_FILES);
+      expect(closed).toBe(true);
+      expect(resources.hasPending).toBe(false);
+    } finally {
+      resume.release();
+      await Promise.allSettled(launched);
+      await resources.close();
+    }
   },
 );
 
@@ -86,50 +101,68 @@ it("retains a failed child while another admitted request reaches later reads", 
       cleanupCause: new Error("close denied"),
     }),
   );
-  const active = searchGuidanceWithReader(
-    { query: "needle" },
-    (path, child) =>
-      child.run(async () => {
-        paths.push(path);
-        if (path === MANAGED_SKILL_FILES[1]) {
-          reached.release();
-          await resume.promise;
-        }
-        return content(path);
-      }),
-    resources,
-  );
-  await reached.promise;
-  const failed = await searchGuidanceWithReader(
-    { query: "needle" },
-    async (_path, child) => {
-      child.retain(failure.cleanupOwner);
-      throw failure;
-    },
-    resources,
-  );
-  if (failed.ok) throw new Error("Expected cleanup failure");
-  expect(failed.error.cleanupResources).toEqual(["owned guidance descriptor"]);
-  expect(failed.error.cleanupIncomplete).toBe(true);
-  const closing = resources.close().then(
-    () => undefined,
-    (cause: unknown) => cause,
-  );
-  resume.release();
-  expect(await active).toMatchObject({
-    ok: true,
-    value: { status: "matches" },
-  });
-  expect(paths).toEqual(MANAGED_SKILL_FILES);
-  expect(await closing).toMatchObject({
-    cleanup: { resources: ["owned guidance descriptor"] },
-  });
-  expect(resources.hasPending).toBe(true);
-  expect(failed.error.cleanupIncomplete).toBe(true);
-  blocked = false;
-  await resources.close();
-  expect(resources.hasPending).toBe(false);
-  expect(failed.error.cleanupIncomplete).toBe(false);
+  const launched: Promise<unknown>[] = [];
+  try {
+    const active = searchGuidanceWithReader(
+      { query: "needle" },
+      (path, child) =>
+        child.run(async () => {
+          paths.push(path);
+          if (path === MANAGED_SKILL_FILES[1]) {
+            reached.release();
+            await resume.promise;
+          }
+          return content(path);
+        }),
+      resources,
+    );
+    launched.push(active);
+    await awaitAcknowledgement(
+      reached.promise,
+      active,
+      "overlapping guidance read",
+    );
+    const failing = searchGuidanceWithReader(
+      { query: "needle" },
+      async (_path, child) => {
+        child.retain(failure.cleanupOwner);
+        throw failure;
+      },
+      resources,
+    );
+    launched.push(failing);
+    const failed = await failing;
+    if (failed.ok) throw new Error("Expected cleanup failure");
+    expect(failed.error.cleanupResources).toEqual([
+      "owned guidance descriptor",
+    ]);
+    expect(failed.error.cleanupIncomplete).toBe(true);
+    const closing = resources.close().then(
+      () => undefined,
+      (cause: unknown) => cause,
+    );
+    launched.push(closing);
+    resume.release();
+    expect(await active).toMatchObject({
+      ok: true,
+      value: { status: "matches" },
+    });
+    expect(paths).toEqual(MANAGED_SKILL_FILES);
+    expect(await closing).toMatchObject({
+      cleanup: { resources: ["owned guidance descriptor"] },
+    });
+    expect(resources.hasPending).toBe(true);
+    expect(failed.error.cleanupIncomplete).toBe(true);
+    blocked = false;
+    await resources.close();
+    expect(resources.hasPending).toBe(false);
+    expect(failed.error.cleanupIncomplete).toBe(false);
+  } finally {
+    resume.release();
+    blocked = false;
+    await Promise.allSettled(launched);
+    await resources.close();
+  }
 });
 
 it("refuses new work after shutdown without reporting a missing bundle", async () => {
