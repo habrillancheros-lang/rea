@@ -678,6 +678,18 @@ are currently unavailable. Opening or closing a target or observing a provider
 health transition leaves that catalog unchanged and does not emit
 `notifications/tools/list_changed`.
 
+Each listed tool carries its owning family in `_meta` under REA's
+vendor-prefixed key, for example
+`{ "io.github.morluto/rea": { "family": "native" } }`. The value is the
+tool-family id from the product catalog's `tools.families`, the same
+vocabulary [`REA_MCP_TOOL_FAMILIES`](#tool-family-advertising-scope) accepts,
+so a client can map any advertised tool back to the scope that enables it. A
+tool keeps its family unless it moves to another family, and that move
+changes the catalog digest. Clients and gateways that index a large catalog
+lazily can group tools by this value instead of guessing from tool names. It
+carries no availability fact; read `binary_session` for the current target,
+provider, and host.
+
 Call `binary_session` with `{}` and read `result.tool_availability` to choose a
 callable operation for the current target, provider, host, and negotiated client
 capabilities. The default result contains the complete inventory in groups that
