@@ -829,3 +829,58 @@ it("preserves valid BMPString code units on both sides of the surrogate range", 
     parseCertificate(readAsn1(namedCertificate(name, name))).subject.text,
   ).toBe("commonName=\ud7ff\ue000\ufeff");
 });
+
+it.each([
+  [
+    "PrintableString",
+    0x13,
+    [
+      "name@host",
+      "under_score",
+      "A\u0000B",
+      "A\tB",
+      "A\n",
+      "A\r",
+      "A\u007f",
+      "é",
+      "中",
+    ],
+  ],
+  ["IA5String", 0x16, ["é", "中"]],
+] as const)(
+  "rejects characters outside the %s alphabet in certificate names",
+  (_label, tag, values) => {
+    for (const value of values) {
+      const invalid = directoryName(der(tag, Buffer.from(value, "utf8")));
+      const valid = directoryName(der(0x0c, Buffer.from(value, "utf8")));
+      for (const [issuer, subject] of [
+        [invalid, valid],
+        [valid, invalid],
+      ] as const) {
+        expect(() =>
+          parseCertificate(readAsn1(namedCertificate(issuer, subject))),
+        ).toThrow(PeCertificateAsn1Failure);
+      }
+      const certificate = parseCertificate(
+        readAsn1(namedCertificate(valid, valid)),
+      );
+      expect(certificate.issuer.attributes[0]?.value).toBe(value);
+      expect(certificate.subject.attributes[0]?.value).toBe(value);
+    }
+  },
+);
+
+it.each([
+  [0x13, "AZaz09 '()+,-./:=?"],
+  [0x16, "mail_box@example.test\u0000\t\u007f"],
+] as const)(
+  "preserves valid character boundaries for name tag %i",
+  (tag, value) => {
+    const name = directoryName(der(tag, Buffer.from(value, "ascii")));
+    const certificate = parseCertificate(
+      readAsn1(namedCertificate(name, name)),
+    );
+    expect(certificate.issuer.attributes[0]?.value).toBe(value);
+    expect(certificate.subject.attributes[0]?.value).toBe(value);
+  },
+);

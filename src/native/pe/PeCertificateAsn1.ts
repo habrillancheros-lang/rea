@@ -186,9 +186,17 @@ const decodeDirectoryString = (
       return decodeUtf32Be(node.content, budget);
     case 0x1e:
       return decodeBmpString(node.content, budget);
-    case 0x0c:
-    case 0x13:
+    case 0x13: {
+      const decoded = decodeUtf8(node.content, budget);
+      if (/[^A-Za-z0-9 '()+,\-./:=?]/u.test(decoded))
+        return fail("PrintableString holds a character outside its alphabet.");
+      return decoded;
+    }
     case 0x16:
+      if (node.content.some((byte) => byte > 0x7f))
+        return fail("IA5String holds a non-ASCII character.");
+      return decodeUtf8(node.content, budget);
+    case 0x0c:
     case 0x17:
     case 0x18:
       return decodeUtf8(node.content, budget);
