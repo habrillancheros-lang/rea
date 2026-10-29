@@ -272,7 +272,8 @@ export type BinaryTarget =
           | "pkg"
           | "intel-hex"
           | "srec"
-          | "esp-image";
+          | "esp-image"
+          | "fit";
       })
   | (BinaryTargetIdentity &
       NonExecutableMetadata & {

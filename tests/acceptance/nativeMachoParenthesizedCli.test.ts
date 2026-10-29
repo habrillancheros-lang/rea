@@ -30,9 +30,9 @@ cliTest.skipIf(process.platform !== "darwin")(
     expect(evidence.subject?.local_path).toBe(target);
     const inspected = inspectMachoSchema.parse(evidence.normalized_result);
     const operand = inspected.provenance
-      .find(({ tool }) => tool === "otool")
-      ?.command.at(-1);
-    expect(operand).toContain("rea-macho-operand-");
+      .flatMap(({ command }) => command)
+      .find((argument) => argument.includes("rea-macho-operand-"));
+    expect(operand).toEqual(expect.any(String));
     if (operand === undefined) throw new Error("missing otool operand");
     await expect(stat(operand)).rejects.toMatchObject({ code: "ENOENT" });
     expect((await readFile(target)).equals(original)).toBe(true);

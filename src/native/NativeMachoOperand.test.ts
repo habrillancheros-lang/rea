@@ -1,15 +1,55 @@
-import { mkdtemp, readlink, rm, stat } from "node:fs/promises";
+import { mkdtemp, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   NativeFixtureRunner,
-  nativeMachoTarget,
+  nativeMachoTargetForFile,
 } from "../../tests/fixtures/nativeCommands.js";
 import { NativeMacOSProvider } from "./NativeMacOSProvider.js";
 import type { NativeCallTracer } from "./LldbCallTracer.js";
 import { NativeCommandFailure } from "./CommandRunner.js";
 import { err } from "../domain/result.js";
+
+const targetDirectories: string[] = [];
+afterEach(async () => {
+  await Promise.all(
+    targetDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+});
+/** A FAT container whose arm64 row matches the canned lipo fixture. */
+const parenthesizedFatTarget = () => {
+  const bytes = Buffer.alloc(40_960);
+  bytes.writeUInt32BE(0xcafebabe, 0);
+  bytes.writeUInt32BE(2, 4);
+  const slices = [
+    { cpu: 0x01000007, subtype: 3, offset: 16_384, size: 4_096, align: 14 },
+    { cpu: 0x0100000c, subtype: 0, offset: 32_768, size: 8_192, align: 14 },
+  ];
+  for (const [index, slice] of slices.entries()) {
+    const at = 8 + index * 20;
+    bytes.writeUInt32BE(slice.cpu, at);
+    bytes.writeUInt32BE(slice.subtype, at + 4);
+    bytes.writeUInt32BE(slice.offset, at + 8);
+    bytes.writeUInt32BE(slice.size, at + 12);
+    bytes.writeUInt32BE(slice.align, at + 16);
+  }
+  const header = bytes.subarray(32_768, 32_800);
+  header.writeUInt32LE(0xfeedfacf, 0);
+  header.writeUInt32LE(0x0100000c, 4);
+  header.writeUInt32LE(0, 8);
+  header.writeUInt32LE(2, 12);
+  return bytes;
+};
+const parenthesizedTarget = async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rea-macho-target-"));
+  targetDirectories.push(directory);
+  const path = join(directory, "app(foo)");
+  await writeFile(path, parenthesizedFatTarget());
+  return { directory, target: await nativeMachoTargetForFile(path) };
+};
 
 const tracer: NativeCallTracer = {
   trace: async () => {
@@ -21,13 +61,15 @@ const tracer: NativeCallTracer = {
 describe("private otool operand lifecycle", () => {
   it("uses a private alias only for otool and removes it after all commands settle", async () => {
     const path = await mkdtemp(join(tmpdir(), "rea-macho-operand-test-"));
-    const target = "/fixture/app(foo)";
+    const selected = await parenthesizedTarget();
+    const target = selected.target.path;
     const calls: { tool: string; operand: string | undefined }[] = [];
     const fixture = new NativeFixtureRunner();
     const runner = {
       async run(tool: string, args: readonly string[]) {
         calls.push({ tool, operand: args.at(-1) });
-        if (tool === "otool") expect(await readlink(args.at(-1)!)).toBe(target);
+        if (args.at(-1) === join(path, "artifact.macho"))
+          expect(await readlink(args.at(-1)!)).toBe(target);
         return fixture.run(tool, args);
       },
     };
@@ -42,26 +84,21 @@ describe("private otool operand lifecycle", () => {
           await rm(path, { recursive: true, force: true });
         },
       }),
-    ).createClient(nativeMachoTarget(target));
+    ).createClient(selected.target);
     try {
       const result = await client.execute("inspect_macho", {});
-      expect(result.ok).toBe(true);
-      if (!result.ok) throw new Error("expected inspection result");
+      if (!result.ok) throw result.error;
       expect(JSON.stringify(result.value.result)).toContain(
         join(path, "artifact.macho"),
       );
-      expect(calls.find(({ tool }) => tool === "otool")?.operand).toBe(
-        join(path, "artifact.macho"),
-      );
-      expect(
-        calls
-          .filter(({ tool }) => tool !== "otool")
-          .every(({ operand }) => operand === target),
-      ).toBe(true);
+      const alias = join(path, "artifact.macho");
+      expect(calls.some(({ operand }) => operand === alias)).toBe(true);
+      expect(calls.some(({ operand }) => operand === target)).toBe(false);
       await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await client.close();
       await rm(path, { recursive: true, force: true });
+      await rm(selected.directory, { recursive: true, force: true });
     }
   });
 
@@ -85,7 +122,7 @@ describe("private otool operand lifecycle", () => {
           await rm(path, { recursive: true, force: true });
         },
       }),
-    ).createClient(nativeMachoTarget("/fixture/app(foo)"));
+    ).createClient((await parenthesizedTarget()).target);
     try {
       const result = await client.execute("inspect_macho", {});
       expect(result.ok).toBe(false);
@@ -114,13 +151,13 @@ describe("private otool operand cleanup", () => {
     "preserves exact failed output with cleanup failure %s",
     async (cleanupFails) => {
       const path = await mkdtemp(join(tmpdir(), "rea-macho-operand-test-"));
-      const message = `otool failed for ${join(path, "artifact.macho")}\n`;
+      const message = `lipo failed for ${join(path, "artifact.macho")}\n`;
       const fixture = new NativeFixtureRunner();
       const runner = {
         async run(tool: string, args: readonly string[]) {
-          if (tool === "otool")
+          if (tool === "lipo")
             return err(
-              new NativeCommandFailure("otool", "nonzero-exit", 1, undefined, {
+              new NativeCommandFailure("lipo", "nonzero-exit", 1, undefined, {
                 stdout: "",
                 stderr: message,
                 stdoutBytes: 0,
@@ -147,7 +184,7 @@ describe("private otool operand cleanup", () => {
             await rm(path, { recursive: true, force: true });
           },
         }),
-      ).createClient(nativeMachoTarget("/fixture/app(foo)"));
+      ).createClient((await parenthesizedTarget()).target);
       try {
         const result = await client.execute("inspect_macho", {});
         expect(result.ok).toBe(false);
@@ -181,7 +218,7 @@ describe("private otool operand cleanup", () => {
           await rm(path, { recursive: true, force: true });
         },
       }),
-    ).createClient(nativeMachoTarget("/fixture/app(foo)"));
+    ).createClient((await parenthesizedTarget()).target);
     try {
       const result = await client.execute("inspect_macho", {});
       expect(result.ok).toBe(false);
@@ -212,7 +249,7 @@ describe("private otool operand cleanup", () => {
           await rm(path, { recursive: true, force: true });
         },
       }),
-    ).createClient(nativeMachoTarget("/fixture/app(foo)"));
+    ).createClient((await parenthesizedTarget()).target);
     try {
       const result = await client.execute(
         "inspect_macho",
