@@ -233,7 +233,7 @@ const modeledGdbReplies = new Map([
   ["-inferior-tty-show", '^done,inferior_tty_terminal="/dev/pts/7"'],
   ['-interpreter-exec console "info files"', "^done"],
   ["-list-thread-groups --recurse 1", "^done,groups=[]"],
-  ["-gdb-exit", "^done"],
+  ["-gdb-exit", "^exit"],
 ]);
 
 it.each(["incomplete", "interrupt", "control"] as const)(
