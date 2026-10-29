@@ -1172,7 +1172,7 @@ const metadataGroupKey = <Metadata>(metadata: Metadata): string => {
     string,
     string | number | boolean | undefined
   >;
-  return JSON.stringify(
+  return compositeKey(
     Object.keys(record)
       .sort()
       .map((key) => [key, record[key]]),
@@ -1289,14 +1289,15 @@ const scriptMapFactsExceed = <Metadata>(
 ): boolean => {
   if (needed.length === 0) return false;
   if (declarationCountsExceed(needed, slots)) return true;
-  const needGroups = groupScriptMapFacts(
-    needed,
-    (item) => `${metadataGroupKey(item.metadata)}\0${item.declaration ?? ""}`,
+  const needGroups = groupScriptMapFacts(needed, (item) =>
+    compositeKey([metadataGroupKey(item.metadata), item.declaration]),
   );
-  const slotGroups = groupScriptMapFacts(
-    slots,
-    (slot) =>
-      `${metadataGroupKey(slot.metadata)}\0${slot.declaration ?? ""}\0${slot.unknown ? "unknown" : "exact"}`,
+  const slotGroups = groupScriptMapFacts(slots, (slot) =>
+    compositeKey([
+      metadataGroupKey(slot.metadata),
+      slot.declaration,
+      slot.unknown,
+    ]),
   );
   if (scriptMapMetadataFitsAll(needGroups, slotGroups, metadataCompatible))
     return false;
