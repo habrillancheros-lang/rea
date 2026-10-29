@@ -116,17 +116,48 @@ export const ZIP_FAMILY_CAPABILITIES = {
   absentInventory: "unavailable",
 } as const satisfies Omit<FormatDescriptor, "id" | "createReader">;
 
-const zipDescriptor = (id: ZipPackageFormat): FormatDescriptor => ({
-  id,
-  ...ZIP_FAMILY_CAPABILITIES,
-  createReader: (path, options) =>
-    new ZipArtifactReader(path, id, undefined, sourceOf(options)),
-});
+type FormatCapabilities = Omit<FormatDescriptor, "id" | "createReader">;
+type ReaderFn = (
+  path: string,
+  options: ArtifactReaderConstruction,
+) => ArtifactReader;
 
-const described = (
-  id: ArtifactFormatId,
-  descriptor: Omit<FormatDescriptor, "id">,
-): FormatDescriptor => ({ id, ...descriptor });
+const withReader = <Id extends ArtifactFormatId>(
+  id: Id,
+  capabilities: FormatCapabilities,
+  createReader: ReaderFn,
+) => ({ id, ...capabilities, createReader });
+
+const withoutReader = <Id extends ArtifactFormatId>(
+  id: Id,
+  capabilities: FormatCapabilities,
+) => ({ id, ...capabilities });
+
+const zipDescriptor = (id: ZipPackageFormat) =>
+  withReader(
+    id,
+    ZIP_FAMILY_CAPABILITIES,
+    (path, options) =>
+      new ZipArtifactReader(path, id, undefined, sourceOf(options)),
+  );
+
+function described<Id extends ArtifactFormatId>(
+  id: Id,
+  descriptor: FormatCapabilities & { readonly createReader: ReaderFn },
+): ReturnType<typeof withReader<Id>>;
+function described<Id extends ArtifactFormatId>(
+  id: Id,
+  descriptor: FormatCapabilities,
+): ReturnType<typeof withoutReader<Id>>;
+function described<Id extends ArtifactFormatId>(
+  id: Id,
+  descriptor: FormatCapabilities & { readonly createReader?: ReaderFn },
+) {
+  const { createReader, ...capabilities } = descriptor;
+  return createReader === undefined
+    ? withoutReader(id, capabilities)
+    : withReader(id, capabilities, createReader);
+}
 
 const plain = {
   zipFamily: false,
@@ -138,15 +169,30 @@ const plain = {
   absentInventory: "root",
 } as const satisfies Omit<FormatDescriptor, "id" | "createReader">;
 
-const container = (
-  id: ArtifactFormatId,
-  descriptor: Partial<Omit<FormatDescriptor, "id">>,
-): FormatDescriptor =>
-  described(id, {
+function container<Id extends ArtifactFormatId>(
+  id: Id,
+  descriptor: Partial<FormatCapabilities> & { readonly createReader: ReaderFn },
+): ReturnType<typeof withReader<Id>>;
+function container<Id extends ArtifactFormatId>(
+  id: Id,
+  descriptor?: Partial<FormatCapabilities>,
+): ReturnType<typeof withoutReader<Id>>;
+function container<Id extends ArtifactFormatId>(
+  id: Id,
+  descriptor: Partial<FormatCapabilities> & {
+    readonly createReader?: ReaderFn;
+  } = {},
+) {
+  const { createReader, ...rest } = descriptor;
+  const capabilities = {
     ...plain,
-    occurrenceContainer: true,
-    ...descriptor,
-  });
+    occurrenceContainer: true as const,
+    ...rest,
+  };
+  return createReader === undefined
+    ? withoutReader(id, capabilities)
+    : withReader(id, capabilities, createReader);
+}
 
 const NON_ZIP_FORMATS = {
   "dotnet-bundle": container("dotnet-bundle", {
@@ -303,23 +349,29 @@ const NON_ZIP_FORMATS = {
       new FitArtifactReader(path, sourceOf(options)),
   }),
   unknown: described("unknown", plain),
-} as const satisfies Record<
+} satisfies Record<
   Exclude<ArtifactFormatId, ZipPackageFormat>,
   FormatDescriptor
 >;
 
 const ZIP_FORMATS = Object.fromEntries(
   ZIP_PACKAGE_FORMATS.map((id) => [id, zipDescriptor(id)]),
-) as { readonly [Id in ZipPackageFormat]: FormatDescriptor };
+) as {
+  readonly [Id in ZipPackageFormat]: ReturnType<typeof zipDescriptor>;
+};
 
 /**
  * One descriptor per domain format id. `unknown` has no reader. ZIP package
  * families share {@link ZIP_FAMILY_CAPABILITIES}.
  */
-export const ARTIFACT_FORMATS = {
+const ARTIFACT_FORMAT_REGISTRY = {
   ...NON_ZIP_FORMATS,
   ...ZIP_FORMATS,
-} as const satisfies Record<ArtifactFormatId, FormatDescriptor>;
+};
+
+export const ARTIFACT_FORMATS: {
+  readonly [Id in ArtifactFormatId]: (typeof ARTIFACT_FORMAT_REGISTRY)[Id];
+} = ARTIFACT_FORMAT_REGISTRY;
 
 const listedFormatIds: readonly ArtifactFormatId[] = ARTIFACT_FORMAT_IDS;
 

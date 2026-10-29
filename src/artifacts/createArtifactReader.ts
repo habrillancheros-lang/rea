@@ -9,11 +9,12 @@ export type { ArtifactReaderConstruction } from "./artifactFormats.js";
 
 /** Formats with an artifact entry reader; availability policy belongs to the caller. */
 export type ArtifactReaderFormat = {
-  [
-    Id in keyof typeof ARTIFACT_FORMATS
-  ]: (typeof ARTIFACT_FORMATS)[Id]["createReader"] extends (
-    ...args: never[]
-  ) => ArtifactReader
+  [Id in keyof typeof ARTIFACT_FORMATS]: (typeof ARTIFACT_FORMATS)[Id] extends {
+    readonly createReader: (
+      path: string,
+      options: ArtifactReaderConstruction,
+    ) => ArtifactReader;
+  }
     ? Id
     : never;
 }[keyof typeof ARTIFACT_FORMATS];
@@ -34,6 +35,8 @@ export function createArtifactReader(
   format: ArtifactOccurrence["artifact_format"],
   options: ArtifactReaderConstruction,
 ): ArtifactReader | undefined {
-  const create = ARTIFACT_FORMATS[format].createReader;
-  return create?.(path, options);
+  const descriptor = ARTIFACT_FORMATS[format];
+  return "createReader" in descriptor
+    ? descriptor.createReader(path, options)
+    : undefined;
 }
