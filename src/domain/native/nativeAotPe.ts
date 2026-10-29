@@ -1104,6 +1104,13 @@ const hydrate = (
   };
   const appendPtr = (target: bigint): void => {
     if (!budget.consumeWork(8)) parserBudgetExhausted("work");
+    // writeBigUInt64LE throws RangeError outside the unsigned 64-bit domain.
+    // That is a malformed fixup, not an unexpected parser failure.
+    if (target < 0n || target > 0xffffffffffffffffn)
+      throw new NativeAotAdmissionError({
+        code: "hydration_failed",
+        detail: "pointer_outside_address_domain",
+      });
     reserveOutput(8).writeBigUInt64LE(target, 0);
   };
   const readFixup = (index: number): bigint => {

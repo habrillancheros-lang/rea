@@ -20,6 +20,7 @@ const NATIVE_AOT_HYDRATION_DETAILS = [
   "invalid_inline_relative_pointer",
   "inline_pointer_fixups_leave",
   "invalid_inline_pointer",
+  "pointer_outside_address_domain",
   "unsupported_command",
   "work_budget",
   "working_memory_budget",

@@ -74,4 +74,25 @@ describe("NativeAOT recovery evidence", () => {
     };
     expect(nativeMetadataRecoverySummarySchema.parse(summary)).toEqual(summary);
   });
+  it("accepts the optional Ghidra extension's string reason", () => {
+    // NativeAotExtension.inspectImage copies this not_applicable summary, and
+    // ReaGhidraExtensions adds the artifact digest before load-image parsing.
+    const summary = {
+      format: "dotnet-nativeaot",
+      status: "not_applicable",
+      reason: "No NativeAOT directory with the supported row layout was found.",
+      analysis_artifact_sha256: "c".repeat(64),
+      header_address: null,
+      discovery: null,
+      format_major: null,
+      format_minor: null,
+      method_tables: 0,
+      types: [],
+      derived_memory: null,
+      coverage: null,
+      diagnostics: [],
+      limitations: ["extension-limitation"],
+    };
+    expect(nativeMetadataRecoverySummarySchema.parse(summary)).toEqual(summary);
+  });
 });
