@@ -71,7 +71,9 @@ export const collectJavaScriptSemanticChildProcesses = (
 ): ChildProcessAnalysis => {
   const context = createSemanticExpressionShapeResolver(state);
   const candidates = collectSpawns(program, state, callables).filter(
-    (candidate) => !forkRejectsStdioArray(candidate, context),
+    (candidate) =>
+      !forkRejectsStdioArray(candidate, context) &&
+      !rejectsOptionsShape(candidate, context),
   );
   const childProcessSpawns = candidates.map((candidate) =>
     immutableSpawn(candidate, context),
@@ -479,6 +481,41 @@ const forkRejectsStdioArray = (
     (literal) =>
       literal !== undefined && literal.found && literal.value === "ipc",
   );
+};
+
+/**
+ * Node validates the options object before creating anything, so a literal
+ * primitive or literal array in that slot throws ERR_INVALID_ARG_TYPE
+ * synchronously and no child process exists. `spawn` also rejects `null`
+ * (`undefined` is its only exemption), while `fork` and `execFile` skip any
+ * nullish options, and `exec` spreads its options and validates none of them.
+ */
+const rejectsOptionsShape = (
+  candidate: SpawnCandidate,
+  context: ChildSpawnContext,
+): boolean => {
+  if (candidate.method === "exec") return false;
+  const { options } = spawnArguments(candidate, context);
+  if (options === undefined) return false;
+  const value = unwrapJavaScriptExpression(options).node;
+  if (context.isArray(value)) return true;
+  const literal = readExactJavaScriptLiteral(value);
+  if (literal.found)
+    return !(candidate.method !== "spawn" && literal.value === null);
+  return isUnpricedPrimitiveLiteral(value);
+};
+
+/**
+ * The exact-value reader deliberately refuses to price a BigInt, a non-finite
+ * numeric literal such as `1e400`, and a negated numeric literal such as `-0`.
+ * All are primitive literals, so Node's options check rejects them the same way;
+ * read the shape directly here rather than widening the shared reader.
+ */
+const isUnpricedPrimitiveLiteral = (value: t.Node): boolean => {
+  if (t.isNumericLiteral(value) || t.isBigIntLiteral(value)) return true;
+  if (!t.isUnaryExpression(value)) return false;
+  const argument = unwrapJavaScriptExpression(value.argument).node;
+  return t.isNumericLiteral(argument) || t.isBigIntLiteral(argument);
 };
 
 /**
