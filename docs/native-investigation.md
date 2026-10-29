@@ -583,7 +583,9 @@ failure. A slice with more than two encryption commands keeps the first two
 and states the count in its reason. Range mapping in all slices shares one
 budget of segment and section records (16,384, a sixteenth of the native
 output budget); a slice past it keeps its status and reports its mapping as
-`unknown` with that reason. Each slice's `range` is end-exclusive in slice and input-file
+`unknown` with that reason. Framing caps retained segment commands before decoding.
+Only a successful mapping consumes the shared allowance; failed mappings leave
+it available to later slices. Each slice's `range` is end-exclusive in slice and input-file
 coordinates and maps to file-backed segment fragments, VM addresses and the
 overlapping nonempty sections; bytes outside every segment remain unmapped
 fragments. A segment with no VM size keeps its file bytes as fragments with

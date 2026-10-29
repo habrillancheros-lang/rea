@@ -36,7 +36,8 @@ interface MappingBudget {
 }
 
 /**
- * Read each slice's `LC_ENCRYPTION_INFO(_64)` status without reading code.
+ * Read each slice's `LC_ENCRYPTION_INFO(_64)` status from structural metadata.
+ * The shared container recognizer owns the reads needed for JVM disambiguation.
  * One slice's defect never hides another slice's status. Range mapping in all
  * slices shares `maximumMappingRecords` segment and section records; a slice
  * past it keeps its status with an unknown mapping.
