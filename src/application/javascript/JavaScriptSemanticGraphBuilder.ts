@@ -14,6 +14,7 @@ import {
 } from "../../domain/javascript/javascriptSemanticGraphSchemas.js";
 import type {
   JavaScriptSemanticCallArgument,
+  JavaScriptSemanticCallReturnFlow,
   JavaScriptSemanticIr,
 } from "../../domain/javascript/javascriptSemanticIr.js";
 import { sourceRangesEqual as rangesEqual } from "../../domain/javascript/javascriptStaticAnalysisHelpers.js";
@@ -1034,20 +1035,27 @@ const projectCalls = (context: FileContext): void => {
       resolution: context.callResolutions.get(flow.callSiteId) ?? "candidate",
     });
   }
-  for (const flow of context.ir.callReturnFlows)
+  const returnFlowsByCallSite = new Map<
+    string,
+    JavaScriptSemanticCallReturnFlow[]
+  >();
+  for (const flow of context.ir.callReturnFlows) {
+    const grouped = returnFlowsByCallSite.get(flow.callSiteId);
+    if (grouped === undefined)
+      returnFlowsByCallSite.set(flow.callSiteId, [flow]);
+    else grouped.push(flow);
     addRelation(context.state, {
       source: context.returnSiteNodes.get(flow.returnSiteId),
       target: context.callSiteNodes.get(flow.callSiteId),
       relation: "returns-to-call",
       resolution: context.callResolutions.get(flow.callSiteId) ?? "candidate",
     });
+  }
   for (const flow of context.ir.callResultFlows) {
     const resolution =
       context.callResolutions.get(flow.callSiteId) ?? "candidate";
     const target = context.bindingNodes.get(flow.bindingId);
-    const returns = context.ir.callReturnFlows.filter(
-      (item) => item.callSiteId === flow.callSiteId,
-    );
+    const returns = returnFlowsByCallSite.get(flow.callSiteId) ?? [];
     // A literal argument may influence the invocation. The assigned value
     // comes from modeled returns, so an ignored parameter does not reach it.
     if (returns.length === 0) {
