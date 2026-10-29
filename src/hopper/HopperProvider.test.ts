@@ -5,6 +5,7 @@ import { silentLogger } from "../logger.js";
 import { ok } from "../domain/result.js";
 import { HopperClient } from "./HopperClient.js";
 import { HopperProvider } from "./HopperProvider.js";
+import { rawLoadAtEntry } from "../domain/rawBinary.fixture.js";
 
 describe("Hopper provider capabilities", () => {
   it("declines caller-selected gamecube-dol targets before the ELF powerpc gate", () => {
@@ -49,8 +50,7 @@ describe("Hopper provider capabilities", () => {
         format: "raw-binary",
         architecture: "arm",
         availableArchitectures: ["arm"],
-        entryPoint: "0x8000000",
-        entryPointSource: "0x8000000",
+        rawLoad: rawLoadAtEntry("0x8000000"),
       }),
     ).toMatchObject({
       status: "unsupported",
