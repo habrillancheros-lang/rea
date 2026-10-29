@@ -72,6 +72,13 @@ import { registerRecordedCrashTools } from "./registerRecordedCrashTools.js";
 import { createDesktopApplicationService } from "../composition/desktop.js";
 import { registerDesktopApplicationTool } from "./registerDesktopApplicationTool.js";
 import { createGoBinaryService } from "../composition/go.js";
+import {
+  createSolanaProgramService,
+  createSolanaReceiptsService,
+} from "../composition/solana.js";
+import type { SolanaProgramService } from "../application/solana/SolanaProgramService.js";
+import { SolanaProgramBatchService } from "../application/solana/SolanaProgramBatchService.js";
+import { registerSolanaTools } from "./registerSolanaTools.js";
 import { createModelArtifactService } from "../composition/model.js";
 import { registerModelArtifactTools } from "./registerModelArtifactTools.js";
 import { createIl2cppMetadataService } from "../composition/il2cpp.js";
@@ -229,6 +236,7 @@ export interface CreateServerOptions {
   readonly logger?: Logger;
   readonly binaryLayout?: BinaryLayoutService;
   readonly goBinary?: GoBinaryService;
+  readonly solanaProgram?: SolanaProgramService;
   readonly il2cppMetadata?: Il2cppMetadataService;
   readonly rustBinary?: RustBinaryService;
   readonly pythonPyc?: PythonPycService;
@@ -479,6 +487,8 @@ export const createServer = (
     options.webModuleTrace ?? createWebModuleTraceService(environment);
   const desktopApplication = createDesktopApplicationService();
   const goBinary = options.goBinary ?? createGoBinaryService();
+  const solanaProgram =
+    options.solanaProgram ?? createSolanaProgramService(environment);
   const rustBinary = options.rustBinary ?? createRustBinaryService();
   const erlangBeam = options.erlangBeam ?? createBeamService();
   const modelArtifact = createModelArtifactService();
@@ -608,6 +618,7 @@ export const createServer = (
       webModuleTrace.close(),
       desktopApplication.close(),
       goBinary.close(),
+      solanaProgram.close(),
       rustBinary.close(),
       erlangBeam.close(),
       il2cppMetadata.close(),
@@ -683,6 +694,7 @@ export const createServer = (
     withAdmittedAnalysis: analysisAdmission,
     artifactResources,
     goBinary,
+    solanaProgram,
     rustBinary,
     erlangBeam,
     il2cppMetadata,
@@ -929,6 +941,7 @@ const registerConfiguredAnalysisTools = (
     recordEvidence,
     withAdmittedAnalysis,
     goBinary,
+    solanaProgram,
     rustBinary,
     erlangBeam,
     il2cppMetadata,
@@ -1057,6 +1070,16 @@ const registerConfiguredAnalysisTools = (
     recordEvidence,
     withAdmittedAnalysis,
     evidenceById,
+  );
+  registerSolanaTools(
+    server,
+    solanaProgram,
+    toolLogger,
+    recordEvidence,
+    withAdmittedAnalysis,
+    evidenceById,
+    new SolanaProgramBatchService(solanaProgram),
+    createSolanaReceiptsService(),
   );
   registerIl2cppTools(
     server,
@@ -1202,6 +1225,7 @@ const createSessionRecorders = (
 
 interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
   readonly goBinary: GoBinaryService;
+  readonly solanaProgram: SolanaProgramService;
   readonly rustBinary: RustBinaryService;
   readonly erlangBeam: BeamService;
   readonly il2cppMetadata: Il2cppMetadataService;
