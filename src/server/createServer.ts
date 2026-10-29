@@ -32,6 +32,7 @@ import {
   createAppleIpsService,
   createDevicetreeService,
   createKernelModuleService,
+  createBtfService,
   createPeLoadConfigService,
   createPeCertificatesService,
   createPeImportsService,
@@ -45,6 +46,7 @@ import {
 import type { ElfNotesService } from "../application/binaryDiagnostics/ElfNotesService.js";
 import type { AppleIpsService } from "../application/binaryDiagnostics/AppleIpsService.js";
 import type { KernelModuleService } from "../application/binaryDiagnostics/KernelModuleService.js";
+import type { BtfService } from "../application/binaryDiagnostics/BtfService.js";
 import type { PeLoadConfigService } from "../application/binaryDiagnostics/PeLoadConfigService.js";
 import type { PeCertificatesService } from "../application/binaryDiagnostics/PeCertificatesService.js";
 import type { PeImportsService } from "../application/binaryDiagnostics/PeImportsService.js";
@@ -53,6 +55,7 @@ import type { NativeExportsService } from "../application/binaryDiagnostics/Nati
 import { registerElfNotesTool } from "./registerElfNotesTool.js";
 import { registerAppleIpsTool } from "./registerAppleIpsTool.js";
 import { registerKernelModuleTool } from "./registerKernelModuleTool.js";
+import { registerBtfTool } from "./registerBtfTool.js";
 import { registerPeLoadConfigTool } from "./registerPeLoadConfigTool.js";
 import { registerPeCertificatesTool } from "./registerPeCertificatesTool.js";
 import { registerPeImportsTool } from "./registerPeImportsTool.js";
@@ -491,6 +494,7 @@ export const createServer = (
   const elfNotes = createElfNotesService();
   const appleIps = createAppleIpsService();
   const kernelModule = createKernelModuleService();
+  const btf = createBtfService();
   const peLoadConfig = createPeLoadConfigService();
   const peCertificates = createPeCertificatesService();
   const peImports = createPeImportsService();
@@ -692,6 +696,7 @@ export const createServer = (
     elfNotes,
     appleIps,
     kernelModule,
+    btf,
     peLoadConfig,
     peCertificates,
     peImports,
@@ -938,6 +943,7 @@ const registerConfiguredAnalysisTools = (
     elfNotes,
     appleIps,
     kernelModule,
+    btf,
     peLoadConfig,
     peCertificates,
     peImports,
@@ -1025,6 +1031,13 @@ const registerConfiguredAnalysisTools = (
   registerKernelModuleTool(
     server,
     kernelModule,
+    toolLogger,
+    recordEvidence,
+    withAdmittedAnalysis,
+  );
+  registerBtfTool(
+    server,
+    btf,
     toolLogger,
     recordEvidence,
     withAdmittedAnalysis,
@@ -1211,6 +1224,7 @@ interface ServerToolContext extends ReturnType<typeof createSessionRecorders> {
   readonly elfNotes: ElfNotesService;
   readonly appleIps: AppleIpsService;
   readonly kernelModule: KernelModuleService;
+  readonly btf: BtfService;
   readonly peLoadConfig: PeLoadConfigService;
   readonly peCertificates: PeCertificatesService;
   readonly peImports: PeImportsService;
