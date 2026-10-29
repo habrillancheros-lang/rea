@@ -36,16 +36,19 @@ import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 const OPERATION = "compare_wasm_interfaces";
 const parseInspection = (
   raw: unknown,
+  side: "left" | "right",
 ): Result<{ evidence: Evidence; result: WasmArtifact }, AnalysisInputError> => {
   const authenticated = safeParseEvidence(raw);
-  if (!authenticated.ok) return inspectionInputFailure(authenticated.error);
+  if (!authenticated.ok)
+    return inspectionInputFailure(authenticated.error, side);
   const evidence = authenticated.value;
   if (evidence.operation !== "inspect_wasm_artifact")
     return inspectionInputFailure(
       new TypeError("Expected complete inspect_wasm_artifact Evidence"),
+      side,
     );
   const parsed = wasmArtifactSchema.safeParse(evidence.normalized_result);
-  if (!parsed.success) return inspectionInputFailure(parsed.error);
+  if (!parsed.success) return inspectionInputFailure(parsed.error, side);
   const result = parsed.data;
   if (
     !wasmArtifactMatchesSubject(
@@ -63,16 +66,19 @@ const parseInspection = (
       new TypeError(
         "WASM Evidence subject/selection does not match normalized artifact identity",
       ),
+      side,
     );
   return ok({ evidence, result });
 };
 
+/** Attribute a rejected side to the input argument that supplied it. */
 const inspectionInputFailure = (
   cause: Error,
+  side: "left" | "right",
 ): Result<never, AnalysisInputError> =>
   err(
     new AnalysisInputError(OPERATION, { cause }, [
-      { path: [], reason: "invalid_value", message: cause.message },
+      { path: [side], reason: "invalid_value", message: cause.message },
     ]),
   );
 
@@ -102,9 +108,9 @@ export const compareWasmInterfaces = async (
   try {
     await setImmediate();
     assertActive();
-    const parsedLeft = parseInspection(resolved.value.left);
+    const parsedLeft = parseInspection(resolved.value.left, "left");
     if (!parsedLeft.ok) return parsedLeft;
-    const parsedRight = parseInspection(resolved.value.right);
+    const parsedRight = parseInspection(resolved.value.right, "right");
     if (!parsedRight.ok) return parsedRight;
     const left = parsedLeft.value;
     const right = parsedRight.value;
