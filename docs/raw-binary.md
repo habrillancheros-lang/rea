@@ -145,8 +145,8 @@ exercised.
 
 - Headers are not discovered from file bytes. This increment does not guess
   load addresses, vector tables, or memory maps.
-- Big-endian ARM, Thumb-only, Cortex-M, and other Ghidra processor variants are
-  unsupported. m68k is the only big-endian family.
+- Big-endian ARM, non-Cortex-M Thumb-only ARM, and other Ghidra processor variants are
+  unsupported. Cortex-M uses ARM:LE:32:Cortex with 16-bit Thumb instruction alignment. m68k is the only big-endian family.
 - Reset vectors, memory-mapped I/O, and firmware boot sequences are not
   emulated.
 - Independent load-image verification covers source identity, mapped file
