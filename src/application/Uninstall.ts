@@ -23,7 +23,9 @@ import { homeDirectoryFromEnvironment } from "../config/homeDirectory.js";
 import { basename, dirname } from "node:path";
 import {
   defaultKunaCacheDirectory,
+  hasParentTraversal,
   sameLexicalDirectory,
+  withinLexicalDirectory,
 } from "../config/kunaCacheDirectory.js";
 import { linuxHopperReleaseCacheDirectory } from "./LinuxHopperCacheDirectory.js";
 
@@ -1143,10 +1145,11 @@ const purgeSelectedData = async (
 ): Promise<readonly UninstallItem[]> => {
   const items: UninstallItem[] = [];
   const directories: string[] = [];
+  let custom: string | undefined;
   if (platform === "darwin" || platform === "linux") {
     const defaultCache = defaultKunaCacheDirectory(home, environment, platform);
     directories.push(defaultCache);
-    const custom = environment.REA_KUNA_CACHE_DIR;
+    custom = environment.REA_KUNA_CACHE_DIR;
     // Lexical spellings identify the default namespace for reporting.
     // Removal still uses the owned-path checks below. Other selections
     // remain separately reported without resolving symbolic links.
@@ -1162,6 +1165,7 @@ const purgeSelectedData = async (
           `Caller-selected Kuna cache ${custom} was retained because purge does not establish ownership of that entire directory.`,
         ),
       );
+    else custom = undefined;
   }
   if (platform === "linux") {
     const hopper = linuxHopperReleaseCacheDirectory(environment, home);
@@ -1169,20 +1173,60 @@ const purgeSelectedData = async (
     else items.push(item("hopper-releases", "failed", hopper.error.message));
   }
   // Resolve selections before a managed namespace removal can delete cwd.
-  // Keep the existing result and removal order after planning those facts.
-  items.unshift(
-    ...(await purgeManagedData(appendCallerPath(home, ".rea"), fileSystem, [
-      "cache",
-      "state",
-    ])),
-  );
-  for (const directory of directories)
-    items.push(
-      ...(await purgeManagedData(dirname(directory), fileSystem, [
-        basename(directory),
-      ])),
+  // A namespace that contains the caller-selected cache is kept whole, so
+  // the retained report is true.
+  const reaRoot = appendCallerPath(home, ".rea");
+  // A spelling with `..` is judged only where the filesystem resolves it,
+  // because collapsing it lexically is wrong after a symbolic link.
+  const resolve = async (path: string): Promise<string[]> => [
+    ...(hasParentTraversal(path) ? [] : [path]),
+    ...(await existingRealpath(fileSystem, path)),
+  ];
+  const selections = custom === undefined ? [] : await resolve(custom);
+  const purge = async (root: string, names: readonly string[]) => {
+    const kept: string[] = [];
+    for (const name of names)
+      for (const target of await resolve(appendCallerPath(root, name)))
+        if (
+          selections.some((selection) =>
+            withinLexicalDirectory(selection, target, platform),
+          ) &&
+          !kept.includes(name)
+        )
+          kept.push(name);
+    const keptItems = kept.map((name) =>
+      item(
+        name,
+        "retained",
+        `${appendCallerPath(root, name)} was retained because it contains the caller-selected Kuna cache ${custom}, which purge does not remove.`,
+      ),
     );
+    const owned = names.filter((name) => !kept.includes(name));
+    return async () => [
+      ...keptItems,
+      ...(await purgeManagedData(root, fileSystem, owned)),
+    ];
+  };
+  const reaPlan = await purge(reaRoot, ["cache", "state"]);
+  const plans: (() => Promise<readonly UninstallItem[]>)[] = [];
+  for (const directory of directories)
+    plans.push(await purge(dirname(directory), [basename(directory)]));
+  items.unshift(...(await reaPlan()));
+  for (const plan of plans) items.push(...(await plan()));
   return items;
+};
+
+/** Canonical spelling of an existing path, or nothing when it cannot be resolved. */
+const existingRealpath = async (
+  fileSystem: UninstallFileSystem,
+  path: string,
+): Promise<string[]> => {
+  try {
+    const resolved = await fileSystem.realpath?.(path);
+    return resolved === undefined ? [] : [resolved];
+  } catch {
+    return [];
+  }
 };
 
 const purgeManagedData = async (
