@@ -8,6 +8,8 @@ import {
   isErasedJavaScriptDeclaration,
   semanticImportEqualsSpecifier,
 } from "./javascriptModuleDeclaration.js";
+import { ELECTRON_MODULE } from "./javascriptElectronMemberWrites.js";
+import { traverseJavaScriptAst } from "./javascriptSemanticTraversal.js";
 
 /** Babel AST produced by REA's inert JavaScript parser boundary. */
 export type ParsedJavaScriptSource = ReturnType<typeof parse>;
@@ -70,13 +72,43 @@ const hasRuntimeModuleDeclaration = (program: t.Program): boolean =>
     );
   });
 
+/**
+ * Electron's preload loader ignores a package's `"type": "module"` and gives
+ * the script `require`; ESM preloads need the .mjs suffix ("ES Modules (ESM)
+ * in Electron"). A renderer with Node integration also provides `require`.
+ * The main process loads such a .js source as an ES module, where `require`
+ * is undefined. A call that requires an Electron module therefore indicates
+ * one of Electron's script loaders, which the package type does not select.
+ */
+const requiresElectronModule = (program: t.Program): boolean => {
+  let found = false;
+  traverseJavaScriptAst(program, {
+    skip: () => found,
+    enter: (node) => {
+      found ||=
+        t.isCallExpression(node) &&
+        t.isIdentifier(node.callee, { name: "require" }) &&
+        t.isStringLiteral(node.arguments[0]) &&
+        ELECTRON_MODULE.test(node.arguments[0].value);
+    },
+  });
+  return found;
+};
+
 const parseWithRuntimeContext = (
   source: string,
   sourcePath: string | undefined,
   options: ParserOptions,
-  packageContext?: JavaScriptPackageType,
+  observedPackageContext?: JavaScriptPackageType,
+  electronScriptLoaders = false,
 ): ParsedJavaScriptSource => {
   const file = parse(source, options);
+  const packageContext =
+    electronScriptLoaders &&
+    observedPackageContext === "module" &&
+    requiresElectronModule(file.program)
+      ? undefined
+      : observedPackageContext;
   runtimeContextByProgram.set(
     file.program,
     /\.c[jt]s$/iu.test(sourcePath ?? "")
@@ -153,6 +185,19 @@ const runtimeSourceTypeForPath = (
       ? "module"
       : "unambiguous";
 
+/**
+ * Node package facts apply to .js/.ts sources, not explicit suffixes,
+ * declaration wrappers, or an unknown JSX compilation pipeline.
+ */
+const packageContextForPath = (
+  sourcePath: string | undefined,
+  observedPackageType: JavaScriptPackageType | undefined,
+): JavaScriptPackageType | undefined =>
+  /\.(?:js|ts)$/iu.test(sourcePath ?? "") &&
+  !/\.d\.ts$/iu.test(sourcePath ?? "")
+    ? observedPackageType
+    : undefined;
+
 export interface RecoveredJavaScriptParse {
   readonly file: ParsedJavaScriptSource;
   /** Errors that apply only if a source of unknown mode is an ES module. */
@@ -172,13 +217,7 @@ export const parseRecoveredJavaScript = (
   observedPackageType?: JavaScriptPackageType,
 ): RecoveredJavaScriptParse => {
   const filenameType = runtimeSourceTypeForPath(sourcePath);
-  // Node package facts apply to .js/.ts sources, not explicit suffixes,
-  // declaration wrappers, or an unknown JSX compilation pipeline.
-  const packageContext =
-    /\.(?:js|ts)$/iu.test(sourcePath ?? "") &&
-    !/\.d\.ts$/iu.test(sourcePath ?? "")
-      ? observedPackageType
-      : undefined;
+  const packageContext = packageContextForPath(sourcePath, observedPackageType);
   // Retain TypeScript import syntax for later CommonJS compilation.
   const sourceType =
     filenameType !== "unambiguous"
@@ -245,36 +284,59 @@ export const parseRecoveredJavaScript = (
   };
 };
 
-/** Parse inert JavaScript or TypeScript facts without attaching comments to AST nodes. */
+/**
+ * Parse inert JavaScript or TypeScript facts without attaching comments to AST
+ * nodes. An observed package type selects the runtime context of .js/.ts
+ * sources as it does for reference imports, except that a module type does
+ * not apply to a source that requires an Electron module; syntax recovery is
+ * unchanged.
+ */
 export const parseJavaScriptSource = (
   source: string,
   sourcePath?: string,
+  observedPackageType?: JavaScriptPackageType,
 ): ParsedJavaScriptSource | null => {
   try {
     const runtimeSourceType = runtimeSourceTypeForPath(sourcePath);
     const commonjs = runtimeSourceType === "commonjs";
+    const packageContext = packageContextForPath(
+      sourcePath,
+      observedPackageType,
+    );
     const options = {
       errorRecovery: true,
       attachComment: false,
       plugins: parserPluginsForPath(sourcePath),
     };
-    const file = parseWithRuntimeContext(source, sourcePath, {
-      ...options,
-      // Inert artifact analysis retains module declarations even in .cjs assets.
-      // Infer their syntax here; reference imports keep filename-mode diagnostics.
-      sourceType: commonjs ? "unambiguous" : runtimeSourceType,
-      allowReturnOutsideFunction: commonjs,
-      allowNewTargetOutsideFunction: commonjs,
-    });
+    const file = parseWithRuntimeContext(
+      source,
+      sourcePath,
+      {
+        ...options,
+        // Inert artifact analysis retains module declarations even in .cjs assets.
+        // Infer their syntax here; reference imports keep filename-mode diagnostics.
+        sourceType: commonjs ? "unambiguous" : runtimeSourceType,
+        allowReturnOutsideFunction: commonjs,
+        allowNewTargetOutsideFunction: commonjs,
+      },
+      packageContext,
+      true,
+    );
     // Unambiguous mode retains module-only diagnostics after choosing a script.
     // The .cjs extension establishes wrapper mode, so obtain its own diagnostics.
     return commonjs &&
       file.program.sourceType === "script" &&
       file.errors.length > 0
-      ? parseWithRuntimeContext(source, sourcePath, {
-          ...options,
-          sourceType: "commonjs",
-        })
+      ? parseWithRuntimeContext(
+          source,
+          sourcePath,
+          {
+            ...options,
+            sourceType: "commonjs",
+          },
+          packageContext,
+          true,
+        )
       : file;
   } catch (cause: unknown) {
     // Unparseable source is represented by the null return.

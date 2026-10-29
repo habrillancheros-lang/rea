@@ -50,6 +50,38 @@ it.each([
 );
 
 it.each([
+  [
+    'const { ipcRenderer } = require("electron");',
+    "preload.js",
+    "module",
+    "unknown",
+  ],
+  [
+    'require("electron/renderer").ipcRenderer.send("ready");',
+    "preload.js",
+    "module",
+    "unknown",
+  ],
+  ['void (() => require("electron"));', "preload.ts", "module", "unknown"],
+  ['const dependency = require("./dep.cjs");', "main.js", "module", "module"],
+  ['const store = require("electron-store");', "main.js", "module", "module"],
+  ['import "./setup.js"; require("electron");', "main.js", "module", "module"],
+  [
+    'const { ipcRenderer } = require("electron");',
+    "preload.js",
+    "commonjs",
+    "commonjs",
+  ],
+] as const)(
+  "applies an observed package type unless Electron's script loaders apply: %s (%s, %s)",
+  (source, path, packageType, context) => {
+    const parsed = parseJavaScriptSource(source, path, packageType);
+    if (parsed === null) throw new Error("Expected parsed source");
+    expect(javaScriptRuntimeContext(parsed.program)).toBe(context);
+  },
+);
+
+it.each([
   ["const args=[]; export = args;", "fixture.ts", "sloppy"],
   ['"use strict"; const args=[]; export = args;', "fixture.ts", "strict"],
   ['import type {T} from "example";', "fixture.ts", "unknown"],
