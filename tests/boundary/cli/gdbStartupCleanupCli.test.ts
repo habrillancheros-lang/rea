@@ -227,6 +227,15 @@ class FakeGdb extends EventEmitter {
   }
 }
 
+const modeledGdbReplies = new Map([
+  ["-gdb-set auto-load off", "^done"],
+  ['-inferior-tty-set "/dev/pts/7"', "^done"],
+  ["-inferior-tty-show", '^done,inferior_tty_terminal="/dev/pts/7"'],
+  ['-interpreter-exec console "info files"', "^done"],
+  ["-list-thread-groups --recurse 1", "^done,groups=[]"],
+  ["-gdb-exit", "^done"],
+]);
+
 it.each(["incomplete", "interrupt", "control"] as const)(
   "reports final GDB cleanup %s as a typed outcome",
   async (mode) => {
@@ -241,18 +250,11 @@ it.each(["incomplete", "interrupt", "control"] as const)(
         requests++;
         const token = match[1] ?? "";
         const tail = match[2] ?? "";
-        const reply = (() => {
-          if (tail.startsWith("-gdb-set ")) return "^done";
-          if (tail.startsWith("-inferior-tty-set ")) return "^done";
-          if (tail.startsWith("-inferior-tty-show"))
-            return '^done,inferior_tty_terminal="/dev/pts/7"';
-          if (tail.startsWith("-interpreter-exec ")) return "^done";
-          if (tail.startsWith("-list-thread-groups ")) return "^done,groups=[]";
-          if (tail.startsWith("-gdb-exit")) return "^done";
-          unmodeled.push(line);
-          return '^error,msg="unmodeled request"';
-        })();
-        child.stdout.write(`${token}${reply}\n`);
+        const reply = modeledGdbReplies.get(tail);
+        if (reply === undefined) unmodeled.push(line);
+        child.stdout.write(
+          `${token}${reply ?? '^error,msg="unmodeled request"'}\n`,
+        );
       }
     });
     let calls = 0;
