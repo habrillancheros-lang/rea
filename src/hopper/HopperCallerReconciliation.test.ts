@@ -8,7 +8,11 @@ import {
   hopperCallerScanBudgetForMilliseconds,
   hopperCallerScanRecovery,
 } from "../config/hopperCallerScanBudget.js";
-import { AnalysisOutputError } from "../domain/analysisErrorCore.js";
+import {
+  AnalysisOutputError,
+  AnalysisResourceConstraintError,
+} from "../domain/analysisErrorCore.js";
+import { HOPPER_CALLER_SCAN_RETENTION_BYTES } from "../domain/native/hopperCallerReconciliation.js";
 
 const identity = (address: string) => ({
   address,
@@ -107,9 +111,13 @@ it("builds one forward index for successive queries in a workflow", async () => 
       forward_observations: {
         target: { address: "0x2000" },
         callee_inventory_callers: [{ address: "0x3000" }],
-        call_references: [edge],
+        call_references: [compactEdge],
       },
     });
+  if (first.ok)
+    expect(first.value.rawResult).not.toHaveProperty(
+      "native_result.instructions",
+    );
   expect(second.ok && second.value.result).toMatchObject({
     references: [edge],
   });
@@ -380,6 +388,66 @@ it("retains original callers and reports a procedure that exceeds the page allow
       `${formatHopperCallerScanReason(result.value.scan)} ${hopperCallerScanRecovery(result.value.scan, hopperCallerScanBudgetForMilliseconds(250))}`,
     );
   }
+});
+
+it("refuses expanded reference copies that exceed the retained scan budget", async () => {
+  const huge = "n".repeat(HOPPER_CALLER_SCAN_RETENTION_BYTES);
+  const heavy = { ...target, name: huge };
+  const callTool = vi.fn().mockImplementation((method: string) =>
+    Promise.resolve(
+      ok(
+        method === "rea_caller_scan_target"
+          ? {
+              target: heavy,
+              instructions: [target.address],
+              instructions_complete: true,
+            }
+          : {
+              start: 0,
+              next: 1,
+              total: 1,
+              oversized: false,
+              items: [
+                {
+                  caller,
+                  callees: [target.address],
+                  references: [
+                    compactEdge,
+                    { ...compactEdge, source_address: "0x3008" },
+                  ],
+                },
+              ],
+            },
+      ),
+    ),
+  );
+  const result = await reconcileHopperCallers(
+    { callTool } as unknown as HopperClient,
+    "procedure_references",
+    { procedure: "name", direction: "incoming" },
+    referenceResult,
+    undefined,
+    250,
+  );
+  expect(result.ok).toBe(false);
+  if (result.ok) return;
+  expect(result.error).toBeInstanceOf(AnalysisResourceConstraintError);
+  expect(result.error).toMatchObject({
+    _tag: "AnalysisResourceConstraintError",
+    reportedLimits: {
+      allowance_bytes: HOPPER_CALLER_SCAN_RETENTION_BYTES,
+    },
+    partialObservation: {
+      kind: "hopper-caller-reconciliation",
+      scan: {
+        stop: {
+          code: "retention_budget",
+          allowance_bytes: HOPPER_CALLER_SCAN_RETENTION_BYTES,
+        },
+      },
+    },
+  });
+  expect(JSON.stringify(result.error.partialObservation)).not.toContain(huge);
 });
 
 it("reports truncated target instructions and native callers", async () => {

@@ -4,6 +4,7 @@ import type { ExecutionOptions } from "../application/AnalysisProvider.js";
 import {
   AnalysisCancelledError,
   AnalysisOutputError,
+  AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -295,6 +296,15 @@ async function buildIndex(
   });
 }
 
+/** Instruction lists are a scan filter, not part of the retained caller reply. */
+const omitInstructionPayload = (value: JsonValue): JsonValue => {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return value;
+  if (!Object.hasOwn(value, "instructions")) return value;
+  const { instructions: _instructions, ...rest } = value;
+  return rest;
+};
+
 /** One shared identity record; destinations cite addresses instead of copies. */
 const compactForwardDestinations = (
   destinations: Map<string, Destination>,
@@ -540,25 +550,99 @@ export const reconcileHopperCallers = async (
   addresses.add(target.address);
   const selectedDestination = index.destinations.get(target.address);
   const callers = new Map(selectedDestination?.callers ?? []);
-  const references = new Map<string, Edge>();
-  for (const { caller, edge } of selectedDestination?.references ?? []) {
-    if (!addresses.has(edge.target_address)) continue;
+  const selectedReferences: Array<{ caller: Identity; edge: CompactEdge }> = [];
+  for (const item of selectedDestination?.references ?? []) {
+    if (!addresses.has(item.edge.target_address)) continue;
     const source =
-      edge.source_procedure === "caller" ? caller : edge.source_procedure;
+      item.edge.source_procedure === "caller"
+        ? item.caller
+        : item.edge.source_procedure;
     if (source !== null) callers.set(source.address, source);
-    references.set(`${edge.source_address}:${edge.target_address}`, {
-      source_address: edge.source_address,
-      target_address: edge.target_address,
-      source_procedure: source,
-      target_procedure: target,
-      kind: {
-        available: false,
-        reason:
-          "Hopper exposes partial CallReference classification, but not detailed reference flags",
-      },
-      call: edge.call,
-    });
+    selectedReferences.push(item);
   }
+  const unavailableKind = {
+    available: false as const,
+    reason:
+      "Hopper exposes partial CallReference classification, but not detailed reference flags",
+  };
+  // The scan budget counted compact pages. Expanded edges repeat each
+  // identity, so measure that copy before allocating it.
+  const expandedReferenceBytes = (): number => {
+    let bytes = 2;
+    const targetBytes = Buffer.byteLength(JSON.stringify(target));
+    const kindBytes = Buffer.byteLength(JSON.stringify(unavailableKind));
+    for (const { caller, edge } of selectedReferences) {
+      const source =
+        edge.source_procedure === "caller"
+          ? caller
+          : edge.source_procedure === null
+            ? null
+            : edge.source_procedure;
+      const sourceBytes =
+        source === null ? 4 : Buffer.byteLength(JSON.stringify(source));
+      const callBytes =
+        edge.call === undefined
+          ? 0
+          : Buffer.byteLength(JSON.stringify(edge.call));
+      bytes +=
+        64 +
+        sourceBytes +
+        targetBytes +
+        kindBytes +
+        callBytes +
+        Buffer.byteLength(edge.source_address) +
+        Buffer.byteLength(edge.target_address);
+      if (bytes > HOPPER_CALLER_SCAN_RETENTION_BYTES) return bytes;
+    }
+    return bytes;
+  };
+  const retainedNativeResult = omitInstructionPayload(original);
+  const compactReferences = selectedReferences.map(({ edge }) => edge);
+  if (
+    operation !== "procedure_callers" &&
+    expandedReferenceBytes() > HOPPER_CALLER_SCAN_RETENTION_BYTES
+  ) {
+    const scan: HopperCallerScanFacts = {
+      ...index.counts,
+      instructions_complete,
+      native_callers_complete: base?.success
+        ? base.data.callers_complete
+        : null,
+      stop: {
+        code: "retention_budget",
+        allowance_bytes: HOPPER_CALLER_SCAN_RETENTION_BYTES,
+      },
+    };
+    return err(
+      retainNative(
+        new AnalysisResourceConstraintError(
+          operation,
+          "memory",
+          describeScan(scan),
+          { allowance_bytes: HOPPER_CALLER_SCAN_RETENTION_BYTES },
+          {
+            retryable: false,
+            remediationAction: hopperCallerScanRecovery(scan, scanBudget),
+          },
+        ),
+        { scan, destinations: index.destinations },
+      ),
+    );
+  }
+  const references = new Map<string, Edge>();
+  if (operation !== "procedure_callers")
+    for (const { caller, edge } of selectedReferences) {
+      const source =
+        edge.source_procedure === "caller" ? caller : edge.source_procedure;
+      references.set(`${edge.source_address}:${edge.target_address}`, {
+        source_address: edge.source_address,
+        target_address: edge.target_address,
+        source_procedure: source,
+        target_procedure: target,
+        kind: unavailableKind,
+        call: edge.call,
+      });
+    }
   const mergeReferences = (
     existing: z.infer<typeof referenceEdgeSchema>[],
     excludeSource?: string,
@@ -617,13 +701,13 @@ export const reconcileHopperCallers = async (
   return ok({
     result,
     rawResult: {
-      native_result: original,
+      native_result: retainedNativeResult,
       forward_observations: {
         target,
         callee_inventory_callers: [
           ...(selectedDestination?.callers.values() ?? []),
         ],
-        call_references: [...references.values()],
+        call_references: compactReferences,
         provenance:
           "hopper-public-python-api:getAllCalleeProcedures and CallReference",
       },
