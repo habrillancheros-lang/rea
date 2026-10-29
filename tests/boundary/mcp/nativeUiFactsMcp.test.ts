@@ -102,9 +102,7 @@ it("advertises and explains the capture source requirement", async () => {
     "observe_native_ui",
     "capture_native_ui_scenario",
   ] as const) {
-    expect(tools.get(name)?.description).toMatch(
-      /screenshot or accessibility must be enabled/iu,
-    );
+    expect(tools.get(name)?.description).toBe(toolContract(name).description);
     const response = await client.callTool({
       name,
       arguments: {

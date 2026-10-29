@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect } from "vitest";
 
 import { thinMach } from "../../../src/domain/binaryTarget.fixture.js";
+import { nativeUiObservationInputSchema } from "../../../src/domain/native/nativeUiObservation.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
 import type { TestCli } from "../../support/cli/cliFixture.js";
@@ -65,14 +66,13 @@ describe("native UI scenario CLI input", () => {
           options: {
             properties: {
               screenshot: {
-                description: expect.stringMatching(
-                  /screenshot or accessibility must be enabled/iu,
-                ),
+                description:
+                  nativeUiObservationInputSchema.shape.screenshot.description,
               },
               accessibility: {
-                description: expect.stringMatching(
-                  /screenshot or accessibility must be enabled/iu,
-                ),
+                description:
+                  nativeUiObservationInputSchema.shape.accessibility
+                    .description,
               },
             },
           },
@@ -81,7 +81,7 @@ describe("native UI scenario CLI input", () => {
     },
   );
 
-  cliTest(
+  cliTest.skipIf(process.platform !== "darwin")(
     "explains why both capture sources cannot be disabled",
     async ({ cli }) => {
       const directory = await createTestTempDirectory(
