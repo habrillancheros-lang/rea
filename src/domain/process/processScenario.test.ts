@@ -6,6 +6,7 @@ import { SESSION_TOOL_CONTRACTS } from "../../contracts/sessionToolContracts.js"
 import { projectInputIssues } from "../inputIssueProjection.js";
 import { nativeCallObservationInputSchema } from "../native/nativeCallObservation.js";
 import {
+  declaredSensitiveScenarioValues,
   digestProcessCommitment,
   PROCESS_TERMINAL_CELL_BUDGET,
   processComparisonContract,
@@ -326,4 +327,24 @@ it("keeps native and PTY environment admission distinct through Standard Schema 
     );
   expect(ajv.compile(nativePublished)(environment)).toBe(true);
   expect(ajv.compile(ptyPublished)(environment)).toBe(false);
+});
+
+it("extracts unique non-empty sensitive values declared in scenario input events", () => {
+  const scenario = processScenarioSchema.parse({
+    executable: "/bin/sh",
+    events: [
+      { type: "input", at_ms: 0, data: "secret-one", sensitive: true },
+      { type: "input", at_ms: 10, data: "plain-input", sensitive: false },
+      { type: "input", at_ms: 20, data: "secret-two", sensitive: true },
+      { type: "input", at_ms: 30, data: "secret-one", sensitive: true },
+      { type: "input", at_ms: 40, data: "", sensitive: true },
+      { type: "resize", at_ms: 50, columns: 80, rows: 24 },
+      { type: "signal", at_ms: 60, signal: "SIGTERM" },
+    ],
+  });
+  expect(declaredSensitiveScenarioValues(scenario)).toEqual([
+    "secret-one",
+    "secret-two",
+  ]);
+  expect(declaredSensitiveScenarioValues({ events: [] })).toEqual([]);
 });

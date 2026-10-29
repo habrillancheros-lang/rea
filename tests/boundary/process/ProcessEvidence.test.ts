@@ -112,6 +112,102 @@ it("does not persist sensitive scripted input in process capture Evidence", () =
   expect(serialized).not.toContain(secret);
 });
 
+it("does not disclose sensitive input echoed across terminal frames and rendered frames", () => {
+  const secret = "top-secret-echoed-password";
+  const scenario = processScenarioSchema.parse({
+    executable: "/bin/sh",
+    events: [
+      { type: "input", at_ms: 0, data: secret, sensitive: true },
+      { type: "input", at_ms: 10, data: "visible-command", sensitive: false },
+    ],
+  });
+  const base = emptyUnverifiedProcessCapture();
+  const executableSha256 = "0".repeat(64);
+  const scenarioProjection = processScenarioCommitment(
+    scenario,
+    executableSha256,
+  );
+  const comparisonContract = processComparisonContract(scenario);
+  const capture = parseProcessCapture(
+    accountFullyObservedProcessCapture({
+      ...base,
+      normalization: scenario.normalization,
+      frames: [
+        { sequence: 0, at_ms: 0, data: "Password: [REDACTED]\r\n" },
+        { sequence: 1, at_ms: 10, data: "visible-command\r\n" },
+      ],
+      rendered_frames: [
+        {
+          sequence: 0,
+          at_ms: 0,
+          columns: 80,
+          rows: 24,
+          cursor_x: 0,
+          cursor_y: 1,
+          active_buffer: "normal",
+          lines: ["Password: [REDACTED]"],
+          serialized_state: "Password: [REDACTED]\r\n",
+        },
+        {
+          sequence: 1,
+          at_ms: 10,
+          columns: 80,
+          rows: 24,
+          cursor_x: 0,
+          cursor_y: 2,
+          active_buffer: "normal",
+          lines: ["Password: [REDACTED]", "visible-command"],
+          serialized_state: "Password: [REDACTED]\r\nvisible-command\r\n",
+        },
+      ],
+      interaction_events: [
+        {
+          sequence: 0,
+          scheduled_at_ms: 0,
+          dispatched_at_ms: 0,
+          type: "input",
+          data: `<redacted-input:${String(Buffer.byteLength(secret))}-bytes>`,
+          outcome: "dispatched",
+        },
+        {
+          sequence: 1,
+          scheduled_at_ms: 10,
+          dispatched_at_ms: 10,
+          type: "input",
+          data: "visible-command",
+          outcome: "dispatched",
+        },
+      ],
+      residual_unknowns: [
+        {
+          scope: "interaction",
+          reason:
+            "Sensitive scripted input values are redacted from process capture Evidence.",
+        },
+        {
+          scope: "environment",
+          reason: "Inherited host environment variables are not recorded.",
+        },
+      ],
+      manifest: {
+        ...base.manifest,
+        scenario: scenarioProjection,
+        comparison_contract: comparisonContract,
+        full_scenario_sha256: digestProcessCommitment(scenarioProjection),
+        comparison_contract_sha256: digestProcessCommitment(comparisonContract),
+        executable_sha256: executableSha256,
+        normalization_sha256: digestProcessCommitment(scenario.normalization),
+      },
+    }),
+  );
+  const evidence = createProcessCaptureEvidence(scenario, capture);
+  const serialized = JSON.stringify(evidence);
+
+  expect(serialized).not.toContain(secret);
+  expect(serialized).toContain("Password: [REDACTED]");
+  expect(serialized).toContain("visible-command");
+});
+
 it("does not treat captures with different redacted inputs as equivalent", () => {
   const left = captureEvidenceForSensitiveInput("secret-left");
   const right = captureEvidenceForSensitiveInput("secret-right");

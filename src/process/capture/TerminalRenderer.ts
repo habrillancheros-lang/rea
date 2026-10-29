@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { redactExplicitText } from "../../domain/explicitSensitiveValues.js";
 import type { TerminalRetention } from "../../domain/process/processCaptureCoverage.js";
 import type { BoundedProcessTextNormalization } from "./ProcessNormalization.js";
 
@@ -27,6 +28,7 @@ interface TerminalRendererOptions {
     maxBytes: number,
   ) => BoundedProcessTextNormalization;
   readonly recordEvent?: RecordProcessCaptureEvent;
+  readonly sensitiveValues?: readonly string[];
 }
 
 /**
@@ -137,6 +139,17 @@ export class TerminalRenderer {
     this.#operations.push(operation);
   }
 
+  #redact(value: string): string {
+    const sensitive = this.options.sensitiveValues;
+    if (
+      sensitive === undefined ||
+      sensitive.length === 0 ||
+      !sensitive.some((literal) => value.includes(literal))
+    )
+      return value;
+    return redactExplicitText(value, sensitive);
+  }
+
   #capture(atMs: number): void {
     const buffer = this.#terminal.buffer.active;
     const lines: string[] = [];
@@ -148,11 +161,12 @@ export class TerminalRenderer {
       const renderedLine =
         line?.translateToString(false, 0, this.#terminal.cols) ??
         " ".repeat(this.#terminal.cols);
+      const sanitizedLine = this.#redact(renderedLine);
       const trailingSpaceBytes = Buffer.byteLength(
-        renderedLine.match(TRAILING_SPACES)?.[0] ?? "",
+        sanitizedLine.match(TRAILING_SPACES)?.[0] ?? "",
       );
       const normalized = this.options.normalize(
-        renderedLine,
+        sanitizedLine,
         Math.min(Number.MAX_SAFE_INTEGER, remainingBytes + trailingSpaceBytes),
       );
       if (normalized.state === "over_budget") {
@@ -175,8 +189,9 @@ export class TerminalRenderer {
       // them keeps sparse screens from costing a full row per blank line.
       lines.push(normalizedLine);
     }
+    const sanitizedState = this.#redact(this.#serializeAddon.serialize());
     const normalizedState = this.options.normalize(
-      this.#serializeAddon.serialize(),
+      sanitizedState,
       remainingBytes,
     );
     if (normalizedState.state === "over_budget") {

@@ -1,6 +1,7 @@
 import type { IPty } from "@lydell/node-pty";
 import type { ProcessCapture } from "../../domain/process/processCaptureParsing.js";
 import type { ProcessScenario } from "../../domain/process/processScenario.js";
+import { declaredSensitiveScenarioValues } from "../../domain/process/processScenario.js";
 import { parseProcessCapture } from "../../domain/process/processCaptureParsing.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import { AnalysisCapabilityUnavailableError } from "../../domain/analysisErrorCore.js";
@@ -250,6 +251,7 @@ const createTerminalRenderer = (
     maxBytes: scenario.limits.output_bytes,
     normalize: normalizeText,
     recordEvent,
+    sensitiveValues: declaredSensitiveScenarioValues(scenario),
   });
 
 interface StartCaptureRuntimeOptions {

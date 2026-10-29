@@ -14,10 +14,12 @@ import {
 import type { ProcessCapture } from "../../domain/process/processCaptureParsing.js";
 import type { ProcessScenario } from "../../domain/process/processScenario.js";
 import {
+  declaredSensitiveScenarioValues,
   digestProcessCommitment,
   processComparisonContract,
   processScenarioCommitment,
 } from "../../domain/process/processScenario.js";
+import { redactExplicitText } from "../../domain/explicitSensitiveValues.js";
 import { parseProcessCapture } from "../../domain/process/processCaptureParsing.js";
 import { PRODUCT_IDENTITY } from "../../identity.js";
 import {
@@ -1443,7 +1445,16 @@ export const captureTerminalFrames = (options: {
   ) => BoundedProcessTextNormalization;
   readonly recordEvent: RecordProcessCaptureEvent;
   readonly identifiers: () => readonly number[];
+  readonly sensitiveValues?: readonly string[];
 }): (() => TerminalCaptureRetention) => {
+  const sensitiveValues =
+    options.sensitiveValues ??
+    declaredSensitiveScenarioValues(options.scenario);
+  const redact = (value: string): string =>
+    sensitiveValues.length === 0 ||
+    !sensitiveValues.some((literal) => value.includes(literal))
+      ? value
+      : redactExplicitText(value, sensitiveValues);
   let rawBytes = 0;
   let normalizedBytes = 0;
   let observedBytes = 0;
@@ -1457,17 +1468,22 @@ export const captureTerminalFrames = (options: {
     const bytes = Buffer.byteLength(data);
     observedBytes += bytes;
     observedFrames += 1;
+    const sanitized = redact(data);
+    const sanitizedBytes = Buffer.byteLength(sanitized);
     const budget = options.scenario.limits.output_bytes;
-    if (bytes > budget - rawBytes) {
+    if (bytes > budget - rawBytes || sanitizedBytes > budget - rawBytes) {
       return;
     }
-    const normalized = options.normalizeText(data, budget - normalizedBytes);
+    const normalized = options.normalizeText(
+      sanitized,
+      budget - normalizedBytes,
+    );
     if (normalized.state === "over_budget") {
       normalizedOmittedFrames += 1;
       return;
     }
     firstIdentifiers ??= options.identifiers();
-    rawBytes += bytes;
+    rawBytes += sanitizedBytes;
     normalizedBytes += normalized.utf8Bytes;
     const atMs = normalizeProcessElapsedTime(
       monotonicProcessCaptureClock() - options.started,
@@ -1478,9 +1494,9 @@ export const captureTerminalFrames = (options: {
       sequence,
       at_ms: atMs,
       data: normalized.value,
-      ...(normalized.value === data ? {} : { raw_data: data }),
+      ...(normalized.value === sanitized ? {} : { raw_data: sanitized }),
     });
-    options.renderer.write(data, atMs);
+    options.renderer.write(sanitized, atMs);
     options.recordEvent("frames", sequence);
   });
   return () => {

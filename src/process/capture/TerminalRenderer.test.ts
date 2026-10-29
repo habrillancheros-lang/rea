@@ -367,3 +367,60 @@ it("renders a bounded sequence of retained chunks and resizes", async () => {
     await renderer.dispose();
   }
 });
+
+it("redacts declared sensitive values from rendered lines and serialized state", async () => {
+  const secret = "SECRET_KEY_RENDER_123";
+  const scenario = processScenarioSchema.parse({
+    executable: "unused",
+    normalization: { paths: false, ports: false, pids: false, patterns: [] },
+  });
+  const renderer = new TerminalRenderer({
+    columns: 40,
+    rows: 4,
+    scrollback: 10,
+    maxBytes: 100_000,
+    normalize: createBoundedProcessTextNormalizer(scenario, "/tmp", -1),
+    sensitiveValues: [secret],
+  });
+  try {
+    renderer.write(`prompt: ${secret}\r\n`, 0);
+    const frames = await renderer.frames();
+    expect(frames).toHaveLength(1);
+    expect(frames[0]?.lines[0]).toBe("prompt: [REDACTED]");
+    expect(frames[0]?.serialized_state).toContain("prompt: [REDACTED]");
+    expect(frames[0]?.serialized_state).not.toContain(secret);
+    expect(JSON.stringify(frames)).not.toContain(secret);
+  } finally {
+    await renderer.dispose();
+  }
+});
+
+it("redacts sensitive values reassembled across split write chunks", async () => {
+  const secret = "SPLIT_SECRET_VALUE";
+  const scenario = processScenarioSchema.parse({
+    executable: "unused",
+    normalization: { paths: false, ports: false, pids: false, patterns: [] },
+  });
+  const renderer = new TerminalRenderer({
+    columns: 40,
+    rows: 4,
+    scrollback: 10,
+    maxBytes: 100_000,
+    normalize: createBoundedProcessTextNormalizer(scenario, "/tmp", -1),
+    sensitiveValues: [secret],
+  });
+  try {
+    // Write 1 has "SPLIT_", Write 2 has "SECRET_VALUE"
+    renderer.write("token: SPLIT_", 0);
+    renderer.write("SECRET_VALUE\r\n", 10);
+    const frames = await renderer.frames();
+    expect(frames).toHaveLength(2);
+    const finalFrame = frames[1];
+    expect(finalFrame?.lines[0]).toBe("token: [REDACTED]");
+    expect(finalFrame?.serialized_state).toContain("token: [REDACTED]");
+    expect(finalFrame?.serialized_state).not.toContain(secret);
+    expect(JSON.stringify(frames)).not.toContain(secret);
+  } finally {
+    await renderer.dispose();
+  }
+});

@@ -4,7 +4,11 @@ import {
   ProcessCaptureSnapshotFailure,
   snapshotRoots,
 } from "./FilesystemSnapshot.js";
-import { buildCaptureResult } from "./ProcessCaptureLifecycle.js";
+import {
+  buildCaptureResult,
+  resolveProcessResult,
+} from "./ProcessCaptureLifecycle.js";
+import { processCaptureCancelled } from "./ProcessCaptureError.js";
 import { isInitializedPtyRoot } from "./ProcessSampling.js";
 import { readLinuxChildren } from "./LinuxProcessSampling.js";
 import { TerminalRenderer } from "./TerminalRenderer.js";
@@ -210,6 +214,161 @@ it("marks redacted scripted input as an interaction unknown", () => {
     reason:
       "Sensitive scripted input values are redacted from process capture Evidence.",
   });
+});
+
+it("excludes sensitive scripted input across completed frames and rendered frames", () => {
+  const capture = emptyCapture();
+  const secret = "TOP_SECRET_AUTH_TOKEN";
+  const frames = [{ sequence: 0, at_ms: 0, data: "echo: [REDACTED]\r\n" }];
+  const renderedFrames = [
+    {
+      sequence: 0,
+      at_ms: 0,
+      columns: 80,
+      rows: 24,
+      cursor_x: 0,
+      cursor_y: 1,
+      active_buffer: "normal" as const,
+      lines: ["echo: [REDACTED]"],
+      serialized_state: "echo: [REDACTED]\r\n",
+    },
+  ];
+  const interactions = [
+    {
+      sequence: 0,
+      scheduled_at_ms: 0,
+      dispatched_at_ms: 0,
+      type: "input" as const,
+      data: `<redacted-input:${String(Buffer.byteLength(secret))}-bytes>`,
+      outcome: "dispatched" as const,
+    },
+  ];
+  const result = buildCaptureResult({
+    frames,
+    exit: { exitCode: 0, reason: "exited" },
+    samples: [],
+    before: {
+      files: [],
+      truncated: false,
+      completeRoots: [],
+      coverage: emptyFilesystemCoverage(),
+    },
+    after: {
+      files: [],
+      truncated: false,
+      completeRoots: [],
+      coverage: emptyFilesystemCoverage(),
+    },
+    truncationDetails: truncationDetails(frames, renderedFrames, []),
+    scenario: processScenarioSchema.parse({
+      ...base,
+      events: [{ type: "input", at_ms: 0, data: secret, sensitive: true }],
+    }),
+    rootPid: 1,
+    samplingPartial: false,
+    renderedFrames,
+    interactions,
+    checkpoints: capture.filesystem_checkpoints,
+    settlement: {
+      state: capture.settlement.state,
+      elapsed_ms: capture.settlement.elapsed_ms,
+    },
+    manifest: capture.manifest,
+    eventJournal: [],
+  });
+
+  const serialized = JSON.stringify(result);
+  expect(serialized).not.toContain(secret);
+  expect(result.frames[0]?.data).toBe("echo: [REDACTED]\r\n");
+  expect(result.rendered_frames[0]?.lines[0]).toBe("echo: [REDACTED]");
+  expect(result.rendered_frames[0]?.serialized_state).toBe(
+    "echo: [REDACTED]\r\n",
+  );
+  expect(result.interaction_events[0]?.data).toContain("<redacted-input:");
+});
+
+it("retains redacted frames in partial observations when execution aborts", () => {
+  const secret = "ABORTED_RUN_SECRET";
+  const scenario = processScenarioSchema.parse({
+    ...base,
+    events: [{ type: "input", at_ms: 0, data: secret, sensitive: true }],
+  });
+  const observations = {
+    target_pid: { state: "available" as const, value: 1 },
+    frames: {
+      state: "available" as const,
+      value: [{ sequence: 0, at_ms: 0, data: "prompt: [REDACTED]\r\n" }],
+    },
+    rendered_frames: {
+      state: "available" as const,
+      value: [
+        {
+          sequence: 0,
+          at_ms: 0,
+          columns: 80,
+          rows: 24,
+          cursor_x: 0,
+          cursor_y: 1,
+          active_buffer: "normal" as const,
+          lines: ["prompt: [REDACTED]"],
+          serialized_state: "prompt: [REDACTED]\r\n",
+        },
+      ],
+    },
+    interaction_events: {
+      state: "available" as const,
+      value: [
+        {
+          sequence: 0,
+          scheduled_at_ms: 0,
+          dispatched_at_ms: 0,
+          type: "input" as const,
+          data: `<redacted-input:${String(Buffer.byteLength(secret))}-bytes>`,
+          outcome: "dispatched" as const,
+        },
+      ],
+    },
+    exit: { state: "unavailable" as const, reason: "cancelled" },
+    settlement: { state: "unavailable" as const, reason: "cancelled" },
+    process_samples: { state: "available" as const, value: [] },
+    filesystem_snapshots: {
+      before: {
+        state: "available" as const,
+        value: {
+          files: [],
+          truncated: false,
+          completeRoots: [],
+          coverage: emptyFilesystemCoverage(),
+        },
+      },
+      after: { state: "unavailable" as const, reason: "cancelled" },
+    },
+    event_journal: { state: "available" as const, value: [] },
+    manifest: { state: "unavailable" as const, reason: "cancelled" },
+  };
+
+  const cleanup = {
+    owned_process_group: { state: "cleaned" as const, reason: null },
+    terminal_renderer: { state: "cleaned" as const, reason: null },
+    temporary_root: { state: "cleaned" as const, reason: null },
+  };
+
+  let error: unknown;
+  try {
+    resolveProcessResult(
+      undefined,
+      processCaptureCancelled(),
+      { report: cleanup, cleanupLease: undefined },
+      observations,
+      { scenario, rootPid: 1 },
+    );
+  } catch (cause) {
+    error = cause;
+  }
+
+  const serialized = JSON.stringify(error);
+  expect(serialized).not.toContain(secret);
+  expect(serialized).toContain("prompt: [REDACTED]");
 });
 
 it("collects and deduplicates children from every Linux thread", async () => {

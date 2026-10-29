@@ -108,6 +108,19 @@ const committedScenarioEvents = (
       : event,
   );
 
+/** Collect literal string values explicitly declared sensitive in scenario input events. */
+export const declaredSensitiveScenarioValues = (
+  scenario: Pick<ProcessScenario, "events">,
+): readonly string[] => [
+  ...new Set(
+    scenario.events.flatMap((event) =>
+      event.type === "input" && event.sensitive && event.data.length > 0
+        ? [event.data]
+        : [],
+    ),
+  ),
+];
+
 /** Build the caller-selected scenario projection committed by process-capture Evidence. */
 export const processScenarioCommitment = (
   scenario: ProcessScenario,
