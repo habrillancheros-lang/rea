@@ -231,19 +231,28 @@ it.each(["incomplete", "interrupt", "control"] as const)(
   "reports final GDB cleanup %s as a typed outcome",
   async (mode) => {
     const child = new FakeGdb();
+    const unmodeled: string[] = [];
+    let requests = 0;
     child.stdout.write("(gdb)\n");
     child.stdin.on("data", (chunk) => {
       for (const line of String(chunk).split("\n")) {
         const match = /^(\d+)(.*)$/u.exec(line);
         if (!match) continue;
+        requests++;
         const token = match[1] ?? "";
         const tail = match[2] ?? "";
-        const payload = tail.includes("list-thread-groups")
-          ? ",groups=[]"
-          : tail.includes("inferior-tty-show")
-            ? ',inferior_tty_terminal="/dev/pts/7"'
-            : "";
-        child.stdout.write(`${token}^done${payload}\n`);
+        const reply = (() => {
+          if (tail.startsWith("-gdb-set ")) return "^done";
+          if (tail.startsWith("-inferior-tty-set ")) return "^done";
+          if (tail.startsWith("-inferior-tty-show"))
+            return '^done,inferior_tty_terminal="/dev/pts/7"';
+          if (tail.startsWith("-interpreter-exec ")) return "^done";
+          if (tail.startsWith("-list-thread-groups ")) return "^done,groups=[]";
+          if (tail.startsWith("-gdb-exit")) return "^done";
+          unmodeled.push(line);
+          return '^error,msg="unmodeled request"';
+        })();
+        child.stdout.write(`${token}${reply}\n`);
       }
     });
     let calls = 0;
@@ -286,6 +295,8 @@ it.each(["incomplete", "interrupt", "control"] as const)(
         args: { command: "info files" },
         options: { inferiorTty: "/dev/pts/7" },
       });
+      expect(requests).toBeGreaterThan(0);
+      expect(unmodeled).toEqual([]);
       if (mode === "control") {
         expect(result).toMatchObject({
           operation: "gdb_console",
