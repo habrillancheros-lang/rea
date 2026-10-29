@@ -1,4 +1,4 @@
-import { registerToolFamilies } from "../contracts/toolFamilies.js";
+import { registerToolFamilies } from "../contracts/toolFamilyIds.js";
 import { AnalysisSettings } from "../application/AnalysisSettings.js";
 import { parseMcpInputBudget } from "../config/mcpInputBudget.js";
 import { registerAnalysisSettingsTools } from "./registerAnalysisSettingsTools.js";

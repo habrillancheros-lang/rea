@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeAmpRegistrationBackup } from "./cli/ampRegistrationBackup.js";
-import { registerToolFamilies } from "./contracts/toolFamilies.js";
+import { registerToolFamilies } from "./contracts/toolFamilyIds.js";
 import { registerGpuCommands } from "./cli/gpuCommands.js";
 import { registerNativeFunctionMatchingCommands } from "./cli/nativeFunctionMatchingCommands.js";
 import { registerCaptureCommands } from "./cli/captureCommands.js";
@@ -216,9 +216,6 @@ export const createCli = (
     adb: () => registerAdbCommands(cli, logger, environment),
     browser: () => {
       registerBrowserCommands(cli, logger);
-      registerWebScriptCommands(cli, logger);
-      registerWebModuleCommands(cli, logger, environment);
-      registerWebSourceLocationCommands(cli, logger, environment);
       registerWebRuntimeCommands(cli, logger);
       registerWebNetworkCaptureCommands(cli, logger, environment);
       registerAdvancedBrowserCommands(cli, logger);
@@ -235,6 +232,9 @@ export const createCli = (
       registerEnvironmentCommands(cli, logger, environment);
       registerProcessCommands(cli, logger, environment);
       registerJavaScriptRecoveryCommands(cli, logger, environment);
+      registerWebScriptCommands(cli, logger);
+      registerWebModuleCommands(cli, logger, environment);
+      registerWebSourceLocationCommands(cli, logger, environment);
       registerApplicationCommands(cli, logger);
     },
     session: () =>

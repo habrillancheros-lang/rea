@@ -3,10 +3,13 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   TOOL_FAMILY_DEFINITIONS,
   contractsForToolFamilies,
-  registerToolFamilies,
   toolFamilyId,
 } from "./toolFamilies.js";
-import { TOOL_FAMILY_IDS, type ToolFamilyId } from "./toolFamilyIds.js";
+import {
+  registerToolFamilies,
+  TOOL_FAMILY_IDS,
+  type ToolFamilyId,
+} from "./toolFamilyIds.js";
 import { TOOL_CONTRACTS, toolContract } from "./toolContracts.js";
 import type {
   officialOutputSchemas,
